@@ -1,0 +1,120 @@
+import type { Ctx } from "./context.ts";
+import { createDb } from "./db.ts";
+import { AppError, errorResponse, json, parseCookies } from "./http.ts";
+import type { Env } from "./runtime.ts";
+import * as authApi from "./handlers/auth.ts";
+import * as invitationsApi from "./handlers/invitations.ts";
+import * as orgApi from "./handlers/organization.ts";
+
+type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+type Handler = (ctx: Ctx) => Promise<unknown>;
+
+type Route = {
+    method: Method;
+    pattern: string;
+    handler: Handler;
+    /**
+     * Точки входа интеграций (загрузка материалов, webhook) проверяют свой
+     * токен/подпись и не требуют заголовка защиты от CSRF.
+     */
+    external?: boolean;
+};
+
+export const routes: Route[] = [
+    // Вход и профиль
+    { method: "POST", pattern: "/api/auth/login", handler: authApi.login },
+    { method: "POST", pattern: "/api/auth/logout", handler: authApi.logout },
+    { method: "POST", pattern: "/api/auth/reset", handler: authApi.resetPassword },
+    { method: "GET", pattern: "/api/me", handler: authApi.me },
+    { method: "PUT", pattern: "/api/me/branch", handler: authApi.selectBranch },
+    { method: "POST", pattern: "/api/me/password", handler: authApi.changePassword },
+    { method: "GET", pattern: "/api/me/sessions", handler: authApi.listSessions },
+    { method: "DELETE", pattern: "/api/me/sessions/:id", handler: authApi.revokeSession },
+    { method: "GET", pattern: "/api/sections/:section", handler: authApi.sectionCheck },
+
+    // Владелец сайта и приглашения
+    { method: "POST", pattern: "/api/owner/activation-links", handler: invitationsApi.ownerIssueActivation },
+    { method: "GET", pattern: "/api/invitations/by-token/:token", handler: invitationsApi.viewInvitation },
+    { method: "POST", pattern: "/api/invitations/by-token/:token/accept", handler: invitationsApi.acceptInvitation },
+    { method: "GET", pattern: "/api/invitations", handler: invitationsApi.listInvitations },
+    { method: "POST", pattern: "/api/invitations", handler: invitationsApi.createInvitation },
+    { method: "POST", pattern: "/api/invitations/:id/revoke", handler: invitationsApi.revokeInvitation },
+
+    // Компания, филиалы, сотрудники
+    { method: "GET", pattern: "/api/company", handler: orgApi.getCompany },
+    { method: "PATCH", pattern: "/api/company", handler: orgApi.updateCompany },
+    { method: "GET", pattern: "/api/branches", handler: orgApi.listBranches },
+    { method: "POST", pattern: "/api/branches", handler: orgApi.createBranch },
+    { method: "PATCH", pattern: "/api/branches/:id", handler: orgApi.updateBranch },
+    { method: "GET", pattern: "/api/users", handler: orgApi.listUsers },
+    { method: "PATCH", pattern: "/api/users/:id", handler: orgApi.updateUser },
+    { method: "POST", pattern: "/api/users/:id/reset-code", handler: orgApi.issueResetCode },
+    { method: "PUT", pattern: "/api/users/:id/admission", handler: orgApi.setAdmission },
+];
+
+type Compiled = Route & { regex: RegExp; keys: string[] };
+
+const compiled: Compiled[] = routes.map((route) => {
+    const keys: string[] = [];
+    const source = route.pattern
+        .split("/")
+        .map((segment) => {
+            if (segment.startsWith(":")) {
+                keys.push(segment.slice(1));
+                return "([^/]+)";
+            }
+            return segment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        })
+        .join("/");
+    return { ...route, regex: new RegExp(`^${source}/?$`), keys };
+});
+
+/** Заголовок, без которого изменяющие запросы отклоняются (простая защита от CSRF) */
+export const CSRF_HEADER = "x-asc-request";
+
+export async function handleApiRequest(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+    const method = request.method.toUpperCase();
+    const candidates = compiled.filter((route) => route.regex.test(url.pathname));
+    if (candidates.length === 0) return errorResponse(new AppError(404, "error.notFound"));
+    const route = candidates.find((candidate) => candidate.method === method);
+    if (!route) return errorResponse(new AppError(405, "error.methodNotAllowed"));
+
+    const match = route.regex.exec(url.pathname);
+    const params: Record<string, string> = {};
+    route.keys.forEach((key, index) => {
+        params[key] = decodeURIComponent(match?.[index + 1] ?? "");
+    });
+
+    const ctx: Ctx = {
+        request,
+        env,
+        db: createDb(env.DB),
+        url,
+        params,
+        now: Date.now(),
+        cookies: parseCookies(request.headers.get("cookie")),
+        setCookies: [],
+    };
+
+    try {
+        if (method !== "GET" && !route.external && request.headers.get(CSRF_HEADER) !== "1") {
+            throw new AppError(403, "auth.csrf");
+        }
+        const result = await route.handler(ctx);
+        if (result instanceof Response) {
+            for (const cookie of ctx.setCookies) result.headers.append("set-cookie", cookie);
+            return result;
+        }
+        return json(result ?? { ok: true }, { cookies: ctx.setCookies });
+    } catch (error) {
+        if (error instanceof AppError) {
+            const response = errorResponse(error);
+            for (const cookie of ctx.setCookies) response.headers.append("set-cookie", cookie);
+            return response;
+        }
+        // В журнал — только тип и текст ошибки, без тела запроса и секретов.
+        console.error(`[api] ${method} ${url.pathname} failed:`, error instanceof Error ? error.message : String(error));
+        return errorResponse(new AppError(500, "error.internal"));
+    }
+}

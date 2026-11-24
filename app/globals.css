@@ -1,0 +1,82 @@
+@import "tailwindcss";
+
+/*
+ * Единые токены оформления. Значения подставляются из config/company.ts
+ * (см. app/layout.tsx → themeStyle). Здесь — только привязка к Tailwind.
+ */
+@theme inline {
+  --color-background: var(--brand-background);
+  --color-foreground: var(--brand-foreground);
+  --color-surface: var(--brand-surface);
+  --color-muted: var(--brand-muted);
+  --color-muted-foreground: var(--brand-muted-foreground);
+  --color-border: var(--brand-border);
+  --color-input: var(--brand-border);
+  --color-primary: var(--brand-primary);
+  --color-primary-foreground: var(--brand-primary-foreground);
+  --color-danger: var(--brand-danger);
+  --color-danger-foreground: var(--brand-danger-foreground);
+  --color-success: var(--brand-success);
+  --color-warning: var(--brand-warning);
+  --color-selected: var(--brand-selected);
+  --color-selected-foreground: var(--brand-selected-foreground);
+  --color-ring: var(--brand-focus);
+  --font-sans: var(--brand-font-sans);
+  --font-mono: var(--brand-font-mono);
+  --radius-md: 6px;
+  --radius-lg: 8px;
+}
+
+:root {
+  /* Компактная плотность (по умолчанию) */
+  --control-h: 2rem;
+  --gap: 0.75rem;
+  --text-base-size: 14px;
+}
+
+:root[data-density="comfortable"] {
+  --control-h: 2.5rem;
+  --gap: 1rem;
+  --text-base-size: 15px;
+}
+
+html {
+  font-size: var(--text-base-size);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--brand-background);
+  color: var(--brand-foreground);
+  font-family: var(--brand-font-sans);
+  margin: 0;
+  min-height: 100vh;
+  line-height: 1.45;
+}
+
+/* Видимый фокус для клавиатуры — одно правило на всё приложение */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--brand-focus);
+  outline-offset: 2px;
+}
+
+/* Длинные имена и названия переносятся, а не ломают раскладку на телефоне */
+.break-anywhere {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.control-h {
+  height: var(--control-h);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

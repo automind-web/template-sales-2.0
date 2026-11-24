@@ -1,0 +1,65 @@
+{
+  "name": "ai-sales-corp",
+  "displayName": "AI Sales Corp",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "install:ci": "bash scripts/install-ci.sh",
+    "dev": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vite",
+    "build": "npm run typecheck && bash scripts/build-verified.sh",
+    "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
+    "test": "node --experimental-sqlite --experimental-strip-types --no-warnings --test test/*.test.ts",
+    "test:build": "npm run build",
+    "validate:artifact": "bash scripts/validate-artifact.sh",
+    "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist",
+    "typecheck": "bash scripts/sites-env.sh -- tsc --noEmit",
+    "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate",
+    "db:lock": "node scripts/lock-migrations.mjs",
+    "test:artifact": "node scripts/smoke-artifact.mjs"
+  },
+  "dependencies": {
+    "class-variance-authority": "0.7.1",
+    "clsx": "2.1.1",
+    "drizzle-orm": "0.45.4",
+    "next": "16.4.6",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "tailwind-merge": "3.7.1"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.68.0",
+    "@tailwindcss/postcss": "4.3.5",
+    "@types/node": "26.6.6",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.3.0",
+    "@vitejs/plugin-rsc": "0.5.39",
+    "drizzle-kit": "0.31.11",
+    "eslint": "9.39.4",
+    "eslint-config-next": "16.4.6",
+    "miniflare": "5.20261101.0-beta",
+    "react-server-dom-webpack": "19.3.1",
+    "tailwindcss": "4.3.5",
+    "typescript": "5.9.3",
+    "vinext": "1.4.4",
+    "vite": "8.3.7",
+    "wrangler": "4.160.0"
+  },
+  "overrides": {
+    "brace-expansion@<1.1.21": "1.1.21",
+    "brace-expansion@>=4.0.0 <5.0.12": "5.0.12",
+    "esbuild": "0.28.2",
+    "fflate": "0.7.5",
+    "minimatch": "11.0.1"
+  },
+  "type": "module",
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "fsevents@2.3.3": true,
+    "workerd@1.20261101.1": true,
+    "unrs-resolver@1.12.2": true
+  }
+}

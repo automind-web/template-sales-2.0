@@ -1,0 +1,217 @@
+/**
+ * Все тексты интерфейса и сообщения сервера на русском.
+ * Чтобы добавить язык, скопируйте файл в kk.ts / en.ts, переведите значения
+ * и подключите его в i18n/index.ts. Ключи не меняйте.
+ * Подстановки: {name} заменяется значением vars.name.
+ */
+export const ru = {
+    // Общие
+    "common.save": "Сохранить",
+    "common.cancel": "Отмена",
+    "common.close": "Закрыть",
+    "common.create": "Создать",
+    "common.retry": "Повторить",
+    "common.loading": "Загрузка…",
+    "common.copy": "Скопировать",
+    "common.copied": "Скопировано",
+    "common.yes": "Да",
+    "common.no": "Нет",
+    "common.back": "Назад",
+    "common.actions": "Действия",
+    "common.none": "—",
+    "common.optional": "необязательно",
+    "common.search": "Поиск",
+    "common.allBranches": "Все филиалы",
+    "common.branch": "Филиал",
+    "common.role": "Роль",
+    "common.status": "Статус",
+    "common.name": "Имя",
+    "common.login": "Логин",
+    "common.password": "Пароль",
+    "common.createdAt": "Создано",
+    "common.expiresAt": "Действует до",
+    "common.errorGeneric": "Что-то пошло не так. Повторите попытку.",
+    "common.errorNetwork": "Нет связи с сервером. Проверьте интернет и повторите.",
+    "common.hotkeyHint": "{action}: {keys}",
+
+    // Метаданные
+    "meta.description": "{company}: обучение, CRM, KPI, статистика и WhatsApp Studio",
+
+    // Горячие клавиши
+    "hotkey.focusSearch": "Перейти к поиску",
+    "hotkey.openSelected": "Открыть выбранную карточку",
+    "hotkey.submitForm": "Сохранить форму",
+    "hotkey.closeDialog": "Закрыть диалог",
+
+    // Роли
+    "role.director": "Директор",
+    "role.manager": "Руководитель филиала",
+    "role.employee": "Сотрудник",
+
+    // Навигация
+    "nav.training": "Обучение",
+    "nav.crm": "CRM",
+    "nav.kpi": "KPI",
+    "nav.stats": "Статистика",
+    "nav.whatsapp": "WhatsApp Studio",
+    "nav.team": "Команда",
+    "nav.branches": "Филиалы",
+    "nav.settings": "Настройки",
+    "nav.profile": "Профиль",
+    "nav.logout": "Выйти",
+    "nav.menu": "Меню",
+    "nav.branchSelect": "Филиал",
+    "nav.skipToContent": "Перейти к содержимому",
+
+    // Вход
+    "auth.login.title": "Вход",
+    "auth.login.subtitle": "Войдите по логину и паролю, которые вы задали при регистрации.",
+    "auth.login.submit": "Войти",
+    "auth.login.forgot": "Забыли пароль?",
+    "auth.login.invalid": "Неверный логин или пароль.",
+    "auth.login.disabled": "Учётная запись отключена. Обратитесь к руководителю.",
+    "auth.login.rateLimited": "Слишком много попыток. Подождите {minutes} мин и попробуйте снова.",
+    "auth.required": "Нужно войти.",
+    "auth.sessionExpired": "Сессия завершена. Войдите снова.",
+    "auth.forbidden": "Недостаточно прав.",
+    "auth.csrf": "Запрос отклонён: отсутствует защитный заголовок.",
+
+    // Регистрация по приглашению / активация директора
+    "invite.title": "Регистрация",
+    "invite.activationTitle": "Активация директора",
+    "invite.for": "Компания «{company}», роль: {role}",
+    "invite.forBranch": "Компания «{company}», филиал «{branch}», роль: {role}",
+    "invite.displayName": "Ваше имя и фамилия",
+    "invite.login": "Придумайте логин",
+    "invite.loginHint": "3–32 символа: латинские буквы, цифры, точка, дефис, подчёркивание.",
+    "invite.password": "Придумайте пароль",
+    "invite.passwordHint": "Не короче 10 символов.",
+    "invite.passwordRepeat": "Повторите пароль",
+    "invite.submit": "Зарегистрироваться",
+    "invite.notFound": "Ссылка не найдена. Проверьте адрес или попросите новую.",
+    "invite.expired": "Срок действия ссылки истёк. Попросите новую.",
+    "invite.used": "По этой ссылке уже зарегистрировались. Войдите или попросите новую ссылку.",
+    "invite.revoked": "Приглашение отозвано. Попросите новое.",
+    "invite.expiresAt": "Ссылка действует до {date}.",
+
+    // Валидация
+    "validation.required": "Заполните поле.",
+    "validation.loginFormat": "Логин: 3–32 символа, латиница, цифры, точка, дефис, подчёркивание.",
+    "validation.loginTaken": "Этот логин уже занят.",
+    "validation.passwordShort": "Пароль должен быть не короче 10 символов.",
+    "validation.passwordLong": "Пароль слишком длинный (максимум 200 символов).",
+    "validation.passwordMismatch": "Пароли не совпадают.",
+    "validation.nameLength": "Имя: от 2 до 80 символов.",
+    "validation.branchNameLength": "Название филиала: от 2 до 80 символов.",
+    "validation.branchNameTaken": "Филиал с таким названием уже есть.",
+    "validation.invalidInput": "Проверьте введённые данные.",
+    "validation.branchRequired": "Выберите филиал.",
+
+    // Владелец
+    "owner.title": "Выпуск ссылки активации директора",
+    "owner.subtitle": "Для владельца сайта. Введите код активации владельца (OWNER_ACTIVATION_CODE) из настроек сайта.",
+    "owner.code": "Код активации владельца",
+    "owner.companyName": "Название компании",
+    "owner.note": "Для кого ссылка",
+    "owner.companyNameHint": "Используется, только если компания ещё не создана.",
+    "owner.submit": "Выпустить ссылку",
+    "owner.result": "Ссылка для директора. Она одноразовая и действует до {date}. Передайте её директору по защищённому каналу.",
+    "owner.invalidCode": "Неверный код владельца.",
+    "owner.notConfigured": "Код владельца не задан. Добавьте секрет OWNER_ACTIVATION_CODE в настройках сайта.",
+
+    // Восстановление пароля
+    "reset.title": "Восстановление пароля",
+    "reset.subtitle": "Попросите код у директора или руководителя филиала. Код одноразовый.",
+    "reset.code": "Код восстановления",
+    "reset.newPassword": "Новый пароль",
+    "reset.submit": "Сменить пароль",
+    "reset.invalid": "Неверный или просроченный код.",
+    "reset.done": "Пароль изменён. Все прежние сессии завершены.",
+    "reset.issueTitle": "Код восстановления пароля",
+    "reset.issueResult": "Код для {name}: передайте его лично. Действует до {date}, показывается один раз.",
+
+    // Шапка / оболочка
+    "shell.notAdmitted": "Доступ к CRM и KPI откроется после допуска: пройдите назначенное обучение.",
+    "shell.sectionLocked": "Раздел недоступен для вашей роли или до допуска.",
+    "shell.comingSoon": "Раздел появится на следующем этапе разработки.",
+    "shell.selectBranchForCrm": "Выберите один филиал в шапке: в CRM директор работает с одним филиалом.",
+
+    // Филиалы
+    "branches.title": "Филиалы",
+    "branches.add": "Добавить филиал",
+    "branches.name": "Название",
+    "branches.city": "Город",
+    "branches.empty": "Филиалов пока нет. Создайте первый, чтобы приглашать сотрудников.",
+    "branches.archive": "В архив",
+    "branches.restore": "Вернуть из архива",
+    "branches.archived": "В архиве",
+    "branches.active": "Работает",
+    "branches.notFound": "Филиал не найден.",
+    "branches.employees": "Сотрудников",
+
+    // Команда
+    "team.title": "Команда",
+    "team.members": "Сотрудники",
+    "team.invitations": "Приглашения",
+    "team.invite": "Пригласить",
+    "team.inviteTitle": "Новое приглашение",
+    "team.inviteNote": "Для кого (имя или комментарий)",
+    "team.inviteCreated": "Ссылка приглашения. Действует до {date}. Ссылку можно открыть несколько раз, она гаснет только после успешной регистрации.",
+    "team.revokeInvite": "Отозвать",
+    "team.inviteStatus.active": "Ожидает",
+    "team.inviteStatus.used": "Использовано",
+    "team.inviteStatus.expired": "Истекло",
+    "team.inviteStatus.revoked": "Отозвано",
+    "team.noMembers": "В выбранном филиале пока никого нет. Пригласите сотрудников.",
+    "team.noInvitations": "Приглашений нет.",
+    "team.admitted": "Допущен",
+    "team.notAdmitted": "Не допущен",
+    "team.grantAdmission": "Выдать допуск",
+    "team.revokeAdmission": "Снять допуск",
+    "team.admissionReason": "Причина",
+    "team.disable": "Отключить",
+    "team.enable": "Включить",
+    "team.statusActive": "Активен",
+    "team.statusDisabled": "Отключён",
+    "team.resetCode": "Код сброса пароля",
+    "team.edit": "Изменить",
+    "team.editTitle": "Роль и филиал сотрудника",
+    "team.lastLogin": "Последний вход",
+    "team.you": "вы",
+    "team.never": "не входил",
+    "team.cannotEditSelf": "Нельзя менять собственную роль, статус или допуск.",
+    "team.userNotFound": "Сотрудник не найден.",
+    "team.lastDirector": "Нельзя отключить или понизить последнего активного директора.",
+
+    // Профиль
+    "profile.title": "Профиль",
+    "profile.changePassword": "Сменить пароль",
+    "profile.currentPassword": "Текущий пароль",
+    "profile.newPassword": "Новый пароль",
+    "profile.passwordChanged": "Пароль изменён. Остальные сессии завершены.",
+    "profile.wrongPassword": "Текущий пароль неверен.",
+    "profile.sessions": "Активные сессии",
+    "profile.thisSession": "Эта сессия",
+    "profile.revokeSession": "Завершить",
+    "profile.lastSeen": "Активность",
+    "profile.device": "Устройство",
+    "profile.admission": "Допуск к CRM",
+
+    // Настройки компании
+    "settings.title": "Настройки компании",
+    "settings.companyName": "Название компании",
+    "settings.timezone": "Часовой пояс",
+    "settings.saved": "Сохранено.",
+    "settings.timezoneHint": "Название по базе IANA, например Asia/Almaty.",
+    "settings.invalidTimezone": "Неизвестный часовой пояс.",
+
+    // Ошибки сервера
+    "error.notFound": "Не найдено.",
+    "error.methodNotAllowed": "Метод не поддерживается.",
+    "error.internal": "Внутренняя ошибка сервера. Повторите попытку позже.",
+    "error.badJson": "Некорректный запрос.",
+    "error.noCompany": "Компания ещё не создана. Владелец должен выпустить ссылку активации директора.",
+} as const;
+
+export type MessageKey = keyof typeof ru;
+export type Messages = Record<MessageKey, string>;
