@@ -25,6 +25,7 @@ const mf = new Miniflare({
                     BUCKET: { type: "r2", name: "smoke-bucket" },
                     ASSETS: { type: "assets" },
                     OWNER_ACTIVATION_CODE: { type: "text", value: "smoke-owner-code" },
+                    INTEGRATION_TOKEN: { type: "text", value: "smoke-integration-token" },
                 },
                 assets: { directory: resolve(root, "dist/client"), hasUserWorker: true },
             },
@@ -80,6 +81,40 @@ try {
     check(meAfter.headers.get("cache-control")?.includes("no-store"), "ответы API не кэшируются");
     const branch = await post("/api/branches", { name: "Smoke-филиал" }, cookie);
     check(branch.status === 200, `создание филиала → ${branch.status}`);
+
+    // Обучение: файл в R2 и редакция через интерфейс интеграции
+    const auth = { authorization: "Bearer smoke-integration-token" };
+    const form = new FormData();
+    form.set("courseKey", "sales-basics");
+    form.set("file", new File([new Uint8Array([1, 2, 3, 4])], "memo.pdf", { type: "application/pdf" }));
+    // Miniflare не передаёт FormData из Node как есть — отправляем готовые байты multipart.
+    const encoded = new Response(form);
+    const multipart = new Uint8Array(await encoded.arrayBuffer());
+    const uploaded = await mf.dispatchFetch(`${base}/api/integration/training/files`, {
+        method: "POST",
+        headers: { ...auth, "content-type": encoded.headers.get("content-type") },
+        body: multipart,
+    });
+    const uploadedBody = await uploaded.json();
+    check(uploaded.status === 200 && uploadedBody.fileId, `файл материала в R2 через интеграцию → ${uploaded.status} ${uploaded.status === 200 ? "" : JSON.stringify(uploadedBody)}`);
+    const edition = {
+        approved: true,
+        externalRef: "smoke-1",
+        title: "Smoke course",
+        lessons: [{ key: "l1", title: "Lesson", body: "Text", fileIds: [uploadedBody.fileId] }],
+        test: { passPercent: 80, questions: [{ key: "q1", text: "?", kind: "single", options: [{ key: "a", text: "A" }, { key: "b", text: "B" }], correct: ["a"] }] },
+    };
+    const published = await mf.dispatchFetch(`${base}/api/integration/training/courses/sales-basics/versions`, { method: "POST", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify(edition) });
+    const publishedBody = await published.json();
+    check(published.status === 200 && publishedBody.version === 1, `редакция курса опубликована → ${published.status}, версия ${publishedBody.version}`);
+    const denied = await mf.dispatchFetch(`${base}/api/integration/training/courses/sales-basics/versions`, { method: "POST", headers: { authorization: "Bearer wrong", "content-type": "application/json" }, body: JSON.stringify(edition) });
+    check(denied.status === 401, `интеграция с неверным токеном → ${denied.status}`);
+    const fileResponse = await mf.dispatchFetch(`${base}/api/training/files/${uploadedBody.fileId}`, { headers: { cookie } });
+    const fileBytes = new Uint8Array(await fileResponse.arrayBuffer());
+    check(fileResponse.status === 200 && fileBytes.length === 4, `файл скачивается из R2 с проверкой прав → ${fileResponse.status}`);
+    const anonymousFile = await mf.dispatchFetch(`${base}/api/training/files/${uploadedBody.fileId}`);
+    check(anonymousFile.status === 401, `файл без входа → ${anonymousFile.status}`);
+
     const asset = await mf.dispatchFetch(`${base}/favicon.svg`);
     check(asset.status === 200, `статический файл → ${asset.status}`);
 } finally {

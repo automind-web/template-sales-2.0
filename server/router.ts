@@ -4,7 +4,9 @@ import { AppError, errorResponse, json, parseCookies } from "./http.ts";
 import type { Env } from "./runtime.ts";
 import * as authApi from "./handlers/auth.ts";
 import * as invitationsApi from "./handlers/invitations.ts";
+import * as integrationApi from "./handlers/integration.ts";
 import * as orgApi from "./handlers/organization.ts";
+import * as trainingApi from "./handlers/training.ts";
 
 type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 type Handler = (ctx: Ctx) => Promise<unknown>;
@@ -50,6 +52,28 @@ export const routes: Route[] = [
     { method: "PATCH", pattern: "/api/users/:id", handler: orgApi.updateUser },
     { method: "POST", pattern: "/api/users/:id/reset-code", handler: orgApi.issueResetCode },
     { method: "PUT", pattern: "/api/users/:id/admission", handler: orgApi.setAdmission },
+
+    // Обучение
+    { method: "GET", pattern: "/api/training/courses", handler: trainingApi.myCourses },
+    { method: "GET", pattern: "/api/training/courses/:id", handler: trainingApi.courseDetail },
+    { method: "POST", pattern: "/api/training/courses/:id/lessons/:lessonKey/complete", handler: trainingApi.completeLesson },
+    { method: "POST", pattern: "/api/training/courses/:id/attempts", handler: trainingApi.startAttempt },
+    { method: "GET", pattern: "/api/training/attempts/:id", handler: trainingApi.getAttempt },
+    { method: "PUT", pattern: "/api/training/attempts/:id/answers", handler: trainingApi.saveAnswers },
+    { method: "POST", pattern: "/api/training/attempts/:id/submit", handler: trainingApi.submitAttempt },
+    { method: "GET", pattern: "/api/training/files/:id", handler: trainingApi.downloadFile },
+    { method: "GET", pattern: "/api/training/progress", handler: trainingApi.teamProgress },
+    { method: "GET", pattern: "/api/training/catalog", handler: trainingApi.catalog },
+    { method: "GET", pattern: "/api/training/assignments", handler: trainingApi.listAssignments },
+    { method: "POST", pattern: "/api/training/assignments", handler: trainingApi.createAssignment },
+    { method: "DELETE", pattern: "/api/training/assignments/:id", handler: trainingApi.removeAssignment },
+    { method: "GET", pattern: "/api/training/admission-rules", handler: trainingApi.getAdmissionRules },
+    { method: "PUT", pattern: "/api/training/admission-rules", handler: trainingApi.saveAdmissionRules },
+
+    // Интерфейс интеграции (Authorization: Bearer INTEGRATION_TOKEN)
+    { method: "GET", pattern: "/api/integration/training/courses", handler: integrationApi.listIntegrationCourses, external: true },
+    { method: "POST", pattern: "/api/integration/training/courses/:key/versions", handler: integrationApi.publishCourseVersion, external: true },
+    { method: "POST", pattern: "/api/integration/training/files", handler: integrationApi.uploadTrainingFile, external: true },
 ];
 
 type Compiled = Route & { regex: RegExp; keys: string[] };

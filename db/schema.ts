@@ -145,3 +145,120 @@ export const auditLog = sqliteTable("audit_log", {
     data: text("data"),
     createdAt: integer("created_at").notNull(),
 }, (t) => [index("audit_log_company_idx").on(t.companyId, t.createdAt)]);
+
+// ---------------------------------------------------------------------------
+// Этап 2. Обучение
+// ---------------------------------------------------------------------------
+
+/** Курс (программа обучения). Ключ стабилен и используется в правилах допуска. */
+export const courses = sqliteTable("courses", {
+    id: text("id").primaryKey(),
+    companyId: text("company_id").notNull().references(() => companies.id),
+    key: text("key").notNull(),
+    title: text("title").notNull(),
+    createdAt: integer("created_at").notNull(),
+    archivedAt: integer("archived_at"),
+}, (t) => [uniqueIndex("courses_company_key_unique").on(t.companyId, t.key)]);
+
+/**
+ * Утверждённая редакция материалов курса. Строка неизменяема: новая редакция —
+ * новая строка с version + 1. content — JSON с уроками и тестом (с ответами).
+ */
+export const courseVersions = sqliteTable("course_versions", {
+    id: text("id").primaryKey(),
+    companyId: text("company_id").notNull().references(() => companies.id),
+    courseId: text("course_id").notNull().references(() => courses.id),
+    version: integer("version").notNull(),
+    title: text("title").notNull(),
+    description: text("description"),
+    content: text("content").notNull(),
+    checksum: text("checksum").notNull(),
+    /** Идентификатор редакции во внешней системе: повторная доставка не создаёт новую версию */
+    externalRef: text("external_ref"),
+    source: text("source", { enum: ["integration"] }).notNull(),
+    createdAt: integer("created_at").notNull(),
+}, (t) => [
+    uniqueIndex("course_versions_course_version_unique").on(t.courseId, t.version),
+    uniqueIndex("course_versions_course_ref_unique").on(t.courseId, t.externalRef),
+]);
+
+/** Файлы материалов: содержимое в R2, метаданные здесь */
+export const trainingFiles = sqliteTable("training_files", {
+    id: text("id").primaryKey(),
+    companyId: text("company_id").notNull().references(() => companies.id),
+    courseId: text("course_id").notNull().references(() => courses.id),
+    objectKey: text("object_key").notNull(),
+    filename: text("filename").notNull(),
+    contentType: text("content_type").notNull(),
+    size: integer("size").notNull(),
+    sha256: text("sha256").notNull(),
+    createdAt: integer("created_at").notNull(),
+}, (t) => [
+    uniqueIndex("training_files_object_key_unique").on(t.objectKey),
+    index("training_files_course_idx").on(t.courseId),
+]);
+
+/** Назначение курса: всем сотрудникам компании, сотрудникам филиала или конкретному человеку */
+export const courseAssignments = sqliteTable("course_assignments", {
+    id: text("id").primaryKey(),
+    companyId: text("company_id").notNull().references(() => companies.id),
+    courseId: text("course_id").notNull().references(() => courses.id),
+    scope: text("scope", { enum: ["company", "branch", "user"] }).notNull(),
+    branchId: text("branch_id").references(() => branches.id),
+    userId: text("user_id").references(() => users.id),
+    createdBy: text("created_by").notNull(),
+    createdAt: integer("created_at").notNull(),
+    removedAt: integer("removed_at"),
+}, (t) => [index("course_assignments_company_idx").on(t.companyId, t.courseId)]);
+
+export const lessonProgress = sqliteTable("lesson_progress", {
+    userId: text("user_id").notNull().references(() => users.id),
+    courseId: text("course_id").notNull().references(() => courses.id),
+    lessonKey: text("lesson_key").notNull(),
+    courseVersionId: text("course_version_id").notNull().references(() => courseVersions.id),
+    completedAt: integer("completed_at").notNull(),
+}, (t) => [primaryKey({ columns: [t.userId, t.courseId, t.lessonKey] })]);
+
+/**
+ * Попытка теста. Версия закрепляется при старте: начатый тест завершается по
+ * своей редакции, новая редакция применяется со следующей попытки.
+ * Одновременно у сотрудника не больше одной незавершённой попытки по курсу.
+ */
+export const testAttempts = sqliteTable("test_attempts", {
+    id: text("id").primaryKey(),
+    companyId: text("company_id").notNull().references(() => companies.id),
+    userId: text("user_id").notNull().references(() => users.id),
+    branchId: text("branch_id"),
+    courseId: text("course_id").notNull().references(() => courses.id),
+    courseVersionId: text("course_version_id").notNull().references(() => courseVersions.id),
+    status: text("status", { enum: ["in_progress", "submitted"] }).notNull(),
+    answers: text("answers").notNull().default("{}"),
+    startedAt: integer("started_at").notNull(),
+    submittedAt: integer("submitted_at"),
+    correctCount: integer("correct_count"),
+    totalCount: integer("total_count"),
+    scorePercent: integer("score_percent"),
+    minScorePercent: integer("min_score_percent"),
+    passed: integer("passed", { mode: "boolean" }),
+}, (t) => [
+    uniqueIndex("test_attempts_one_open_unique").on(t.userId, t.courseId).where(sql`status = 'in_progress'`),
+    index("test_attempts_company_branch_idx").on(t.companyId, t.branchId),
+    index("test_attempts_user_course_idx").on(t.userId, t.courseId),
+]);
+
+/**
+ * Правила допуска к CRM: какой курс и какой минимальный результат нужен.
+ * branch_id = null — правило для всех филиалов; правила филиала заменяют общие.
+ * Пока директор не сохранил свои правила, действуют правила из config/company.ts.
+ */
+export const admissionRules = sqliteTable("admission_rules", {
+    id: text("id").primaryKey(),
+    companyId: text("company_id").notNull().references(() => companies.id),
+    role: text("role", { enum: ["employee"] }).notNull(),
+    branchId: text("branch_id").references(() => branches.id),
+    courseKey: text("course_key").notNull(),
+    minScorePercent: integer("min_score_percent").notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: integer("created_at").notNull(),
+    removedAt: integer("removed_at"),
+}, (t) => [index("admission_rules_company_idx").on(t.companyId)]);

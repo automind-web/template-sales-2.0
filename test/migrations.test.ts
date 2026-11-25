@@ -11,7 +11,7 @@ test("миграции применяются с нуля по журналу и
     const applied = applyMigrations(db);
     assert.ok(applied.length >= 1);
     const tables = (db.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all() as Array<{ name: string }>).map((row) => row.name);
-    for (const table of ["companies", "company_settings", "branches", "users", "sessions", "invitations", "password_reset_codes", "admissions", "rate_limits", "audit_log"]) {
+    for (const table of ["companies", "company_settings", "branches", "users", "sessions", "invitations", "password_reset_codes", "admissions", "rate_limits", "audit_log", "courses", "course_versions", "training_files", "course_assignments", "lesson_progress", "test_attempts", "admission_rules"]) {
         assert.ok(tables.includes(table), `нет таблицы ${table}`);
     }
     const fk = db.sqlite.prepare("PRAGMA foreign_key_check").all();

@@ -1,13 +1,29 @@
 import { handleApiRequest } from "../../server/router.ts";
 import type { Env } from "../../server/runtime.ts";
 import { applyMigrations, TestD1 } from "./d1.ts";
+import { TestR2 } from "./r2.ts";
 
 export const OWNER_CODE = "owner-secret-code-for-tests";
+export const INTEGRATION_TOKEN = "integration-token-for-tests";
 
-export function createTestEnv(overrides: Partial<Env> = {}): Env & { DB: TestD1 } {
+export function createTestEnv(overrides: Partial<Env> = {}): Env & { DB: TestD1; BUCKET: TestR2 } {
     const db = new TestD1();
     applyMigrations(db);
-    return { DB: db, OWNER_ACTIVATION_CODE: OWNER_CODE, ...overrides } as Env & { DB: TestD1 };
+    return { DB: db, BUCKET: new TestR2(), OWNER_ACTIVATION_CODE: OWNER_CODE, INTEGRATION_TOKEN, ...overrides } as Env & { DB: TestD1; BUCKET: TestR2 };
+}
+
+/** Запрос к интерфейсу интеграции (без cookie и CSRF-заголовка, с токеном) */
+export async function integration<T = Record<string, unknown>>(env: Env, method: string, path: string, body?: unknown, token: string | null = INTEGRATION_TOKEN): Promise<ApiResult<T>> {
+    const headers = new Headers({ "cf-connecting-ip": "10.200.0.1" });
+    if (token) headers.set("authorization", `Bearer ${token}`);
+    let payload: BodyInit | undefined;
+    if (body instanceof FormData) payload = body;
+    else if (body !== undefined) {
+        headers.set("content-type", "application/json");
+        payload = JSON.stringify(body);
+    }
+    const response = await handleApiRequest(new Request(`https://sales.example${path}`, { method, headers, ...(payload ? { body: payload } : {}) }), env);
+    return { status: response.status, body: (await response.json()) as ApiResult<T>["body"] };
 }
 
 export type ApiResult<T = Record<string, unknown>> = { status: number; body: T & { error?: { code: string; message: string; fields?: Record<string, string> } } };
@@ -41,6 +57,13 @@ export class TestClient {
             else this.cookies.set(name, value);
         }
         return { status: response.status, body: (await response.json()) as ApiResult<T>["body"] };
+    }
+
+    /** Сырой ответ (для скачивания файлов) */
+    async raw(path: string): Promise<Response> {
+        const headers = new Headers({ "cf-connecting-ip": this.ip });
+        if (this.cookies.size) headers.set("cookie", [...this.cookies].map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("; "));
+        return handleApiRequest(new Request(`https://sales.example${path}`, { headers }), this.env);
     }
 
     get<T = Record<string, unknown>>(path: string) {

@@ -12,6 +12,7 @@ hosting="${SITES_PROJECT_ROOT}/dist/.openai/hosting.json"
 migration_root="${SITES_PROJECT_ROOT}/dist/.openai/drizzle"
 required_migrations=(
   "0000_init.sql"
+  "0001_training.sql"
   "meta/_journal.json"
 )
 
