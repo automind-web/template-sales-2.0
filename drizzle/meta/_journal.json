@@ -29,6 +29,13 @@
       "when": 1795697853562,
       "tag": "0003_kpi",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1795698514591,
+      "tag": "0004_whatsapp",
+      "breakpoints": true
     }
   ]
 }

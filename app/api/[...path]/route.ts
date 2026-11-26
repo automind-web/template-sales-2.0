@@ -1,11 +1,11 @@
 import { handleApiRequest } from "../../../server/router.ts";
-import { getEnv } from "../../../server/runtime.ts";
+import { getEnv, getWaitUntil } from "../../../server/runtime.ts";
 
 export const dynamic = "force-dynamic";
 
 /** Все серверные операции проходят через один роутер: права, CSRF и ошибки — в одном месте */
 async function handle(request: Request): Promise<Response> {
-    return handleApiRequest(request, getEnv());
+    return handleApiRequest(request, getEnv(), getWaitUntil());
 }
 
 export const GET = handle;

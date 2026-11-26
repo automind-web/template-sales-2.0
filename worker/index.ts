@@ -73,7 +73,16 @@ const worker = {
             await applyDevMigrations(env.DB);
         }
 
-        return runWithEnv(env, async () => withSecurityHeaders(await handler.fetch(request, env, ctx)));
+        return runWithEnv(env, async () => withSecurityHeaders(await handler.fetch(request, env, ctx)), (promise) => ctx.waitUntil(promise));
+    },
+
+    /**
+     * Расписание Sites (если включено для сайта): короткий повтор неотправленных
+     * ответов WhatsApp. Без расписания повтор идёт при входящих и по кнопке.
+     */
+    async scheduled(_event: unknown, env: WorkerEnv, ctx: ExecutionContext): Promise<void> {
+        const { retryPending } = await import("../server/whatsapp/service.ts");
+        ctx.waitUntil(runWithEnv(env, () => retryPending(env, Date.now(), { limit: 20, minAgeMs: 60_000 })).then(() => undefined));
     },
 };
 

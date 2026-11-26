@@ -357,3 +357,81 @@ export const kpiVersions = sqliteTable("kpi_versions", {
     uniqueIndex("kpi_versions_scope_version_unique").on(t.companyId, t.scope, t.version),
     index("kpi_versions_approved_idx").on(t.companyId, t.scope, t.approvedAt),
 ]);
+
+// ---------------------------------------------------------------------------
+// Этап 7. WhatsApp Studio
+// ---------------------------------------------------------------------------
+
+/** Агент филиала — копия базового агента с инструкцией филиала */
+export const waAgents = sqliteTable("wa_agents", {
+    id: text("id").primaryKey(),
+    companyId: text("company_id").notNull().references(() => companies.id),
+    branchId: text("branch_id").notNull().references(() => branches.id),
+    name: text("name").notNull(),
+    instructions: text("instructions").notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: integer("created_at").notNull(),
+    updatedBy: text("updated_by"),
+    updatedAt: integer("updated_at").notNull(),
+    /** Результат последней проверки в тестовом диалоге */
+    lastTestAt: integer("last_test_at"),
+    lastTestOk: integer("last_test_ok", { mode: "boolean" }),
+    lastTestMode: text("last_test_mode", { enum: ["model", "offline"] }),
+    lastTestError: text("last_test_error"),
+}, (t) => [uniqueIndex("wa_agents_branch_unique").on(t.branchId)]);
+
+/** Разрешённые материалы: агент отвечает только по ним */
+export const waMaterials = sqliteTable("wa_materials", {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id").notNull().references(() => waAgents.id),
+    companyId: text("company_id").notNull(),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    source: text("source", { enum: ["text", "course"] }).notNull(),
+    sourceRef: text("source_ref"),
+    createdBy: text("created_by").notNull(),
+    createdAt: integer("created_at").notNull(),
+}, (t) => [index("wa_materials_agent_idx").on(t.agentId)]);
+
+/**
+ * Рабочий номер филиала через Whapi. Секрет webhook хранится только как хэш,
+ * сам секрет есть лишь в адресе, который сохранён в настройках Whapi.
+ */
+export const waChannels = sqliteTable("wa_channels", {
+    id: text("id").primaryKey(),
+    companyId: text("company_id").notNull().references(() => companies.id),
+    branchId: text("branch_id").notNull().references(() => branches.id),
+    phone: text("phone"),
+    webhookTokenHash: text("webhook_token_hash").notNull(),
+    status: text("status", { enum: ["connected", "disconnected"] }).notNull(),
+    connectedBy: text("connected_by"),
+    connectedAt: integer("connected_at"),
+    lastCheckAt: integer("last_check_at"),
+    lastCheckState: text("last_check_state"),
+    lastCheckDetail: text("last_check_detail"),
+    lastInboundAt: integer("last_inbound_at"),
+}, (t) => [
+    uniqueIndex("wa_channels_branch_unique").on(t.branchId),
+    uniqueIndex("wa_channels_token_unique").on(t.webhookTokenHash),
+]);
+
+/** Журнал сообщений канала; повторная доставка входящего не создаёт дубль */
+export const waMessages = sqliteTable("wa_messages", {
+    id: text("id").primaryKey(),
+    companyId: text("company_id").notNull(),
+    branchId: text("branch_id").notNull(),
+    chatId: text("chat_id").notNull(),
+    direction: text("direction", { enum: ["in", "out"] }).notNull(),
+    text: text("text").notNull(),
+    externalId: text("external_id"),
+    status: text("status", { enum: ["received", "pending", "sent", "failed"] }).notNull(),
+    error: text("error"),
+    attempts: integer("attempts").notNull().default(0),
+    leadId: text("lead_id"),
+    replyToId: text("reply_to_id"),
+    createdAt: integer("created_at").notNull(),
+}, (t) => [
+    uniqueIndex("wa_messages_external_unique").on(t.externalId),
+    index("wa_messages_branch_idx").on(t.branchId, t.createdAt),
+    index("wa_messages_status_idx").on(t.status, t.createdAt),
+]);

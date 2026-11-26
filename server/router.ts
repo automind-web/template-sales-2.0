@@ -1,7 +1,7 @@
 import type { Ctx } from "./context.ts";
 import { createDb } from "./db.ts";
 import { AppError, errorResponse, json, parseCookies } from "./http.ts";
-import type { Env } from "./runtime.ts";
+import type { Env, WaitUntil } from "./runtime.ts";
 import * as analyticsApi from "./handlers/analytics.ts";
 import * as authApi from "./handlers/auth.ts";
 import * as crmApi from "./handlers/crm.ts";
@@ -9,6 +9,7 @@ import * as invitationsApi from "./handlers/invitations.ts";
 import * as integrationApi from "./handlers/integration.ts";
 import * as orgApi from "./handlers/organization.ts";
 import * as trainingApi from "./handlers/training.ts";
+import * as waApi from "./handlers/whatsapp.ts";
 
 type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 type Handler = (ctx: Ctx) => Promise<unknown>;
@@ -92,6 +93,20 @@ export const routes: Route[] = [
     { method: "POST", pattern: "/api/kpi/methodology/:id/approve", handler: analyticsApi.approveMethodology },
     { method: "GET", pattern: "/api/kpi/report", handler: analyticsApi.kpiReport },
 
+    // WhatsApp Studio
+    { method: "GET", pattern: "/api/whatsapp/studio", handler: waApi.studio },
+    { method: "POST", pattern: "/api/whatsapp/agent", handler: waApi.createAgent },
+    { method: "PATCH", pattern: "/api/whatsapp/agent", handler: waApi.updateAgent },
+    { method: "POST", pattern: "/api/whatsapp/materials", handler: waApi.addMaterial },
+    { method: "DELETE", pattern: "/api/whatsapp/materials/:id", handler: waApi.deleteMaterial },
+    { method: "POST", pattern: "/api/whatsapp/test", handler: waApi.testDialog },
+    { method: "POST", pattern: "/api/whatsapp/channel/connect", handler: waApi.connectChannel },
+    { method: "POST", pattern: "/api/whatsapp/channel/check", handler: waApi.checkChannelState },
+    { method: "POST", pattern: "/api/whatsapp/channel/disconnect", handler: waApi.disconnectChannel },
+    { method: "POST", pattern: "/api/whatsapp/messages/retry", handler: waApi.retryMessages },
+    // Входящие сообщения Whapi: секрет в адресе, проверяется по хэшу
+    { method: "POST", pattern: "/api/whatsapp/webhook/:token", handler: waApi.webhook, external: true },
+
     // Интерфейс интеграции (Authorization: Bearer INTEGRATION_TOKEN)
     { method: "GET", pattern: "/api/integration/training/courses", handler: integrationApi.listIntegrationCourses, external: true },
     { method: "POST", pattern: "/api/integration/training/courses/:key/versions", handler: integrationApi.publishCourseVersion, external: true },
@@ -118,7 +133,7 @@ const compiled: Compiled[] = routes.map((route) => {
 /** Заголовок, без которого изменяющие запросы отклоняются (простая защита от CSRF) */
 export const CSRF_HEADER = "x-asc-request";
 
-export async function handleApiRequest(request: Request, env: Env): Promise<Response> {
+export async function handleApiRequest(request: Request, env: Env, waitUntil: WaitUntil | null = null): Promise<Response> {
     const url = new URL(request.url);
     const method = request.method.toUpperCase();
     const candidates = compiled.filter((route) => route.regex.test(url.pathname));
@@ -141,6 +156,7 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
         now: Date.now(),
         cookies: parseCookies(request.headers.get("cookie")),
         setCookies: [],
+        waitUntil,
     };
 
     try {

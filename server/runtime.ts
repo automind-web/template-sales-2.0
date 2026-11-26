@@ -12,16 +12,23 @@ export type Env = {
 
 export type SecretName = "WHAPI_TOKEN" | "OPENAI_API_KEY" | "INTEGRATION_TOKEN" | "OWNER_ACTIVATION_CODE";
 
-const storage = new AsyncLocalStorage<Env>();
+/** Продление работы после ответа (ctx.waitUntil Worker'а) */
+export type WaitUntil = (promise: Promise<unknown>) => void;
 
-export function runWithEnv<T>(env: Env, callback: () => T): T {
-    return storage.run(env, callback);
+const storage = new AsyncLocalStorage<{ env: Env; waitUntil: WaitUntil | null }>();
+
+export function runWithEnv<T>(env: Env, callback: () => T, waitUntil: WaitUntil | null = null): T {
+    return storage.run({ env, waitUntil }, callback);
 }
 
 export function getEnv(): Env {
-    const env = storage.getStore();
-    if (!env) throw new Error("Runtime bindings are unavailable for this request.");
-    return env;
+    const store = storage.getStore();
+    if (!store) throw new Error("Runtime bindings are unavailable for this request.");
+    return store.env;
+}
+
+export function getWaitUntil(): WaitUntil | null {
+    return storage.getStore()?.waitUntil ?? null;
 }
 
 /**
