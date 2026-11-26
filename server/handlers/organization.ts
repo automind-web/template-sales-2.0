@@ -8,6 +8,7 @@ import type { Ctx } from "../context.ts";
 import { randomCode, sha256Hex } from "../crypto.ts";
 import { isUniqueViolation, newId } from "../db.ts";
 import { AppError, badRequest, bool, optStr, readJson, str } from "../http.ts";
+import { getSecret } from "../runtime.ts";
 import { isValidTimezone } from "../validation.ts";
 
 // --- Компания ---
@@ -30,6 +31,22 @@ export async function updateCompany(ctx: Ctx) {
     await ctx.db.update(companies).set({ name, timezone, updatedAt: ctx.now }).where(eq(companies.id, actor.companyId));
     await audit(ctx.db, { companyId: actor.companyId, actorUserId: actor.userId, action: "company.update", entityType: "company", entityId: actor.companyId, data: { name, timezone } }, ctx.now);
     return { ok: true };
+}
+
+/**
+ * Состояние подключений для вкладки «Подключения». Секреты не раскрываются:
+ * только признак «задан / не задан» и наличие привязки хранилища.
+ */
+export async function connections(ctx: Ctx) {
+    const actor = await requireActor(ctx);
+    requireRole(actor, "director");
+    return {
+        integration: getSecret(ctx.env, "INTEGRATION_TOKEN") !== null,
+        storage: Boolean(ctx.env.BUCKET),
+        whapi: getSecret(ctx.env, "WHAPI_TOKEN") !== null,
+        model: getSecret(ctx.env, "OPENAI_API_KEY") !== null,
+        ownerCode: getSecret(ctx.env, "OWNER_ACTIVATION_CODE") !== null,
+    };
 }
 
 // --- Филиалы ---

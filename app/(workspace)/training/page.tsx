@@ -1,27 +1,26 @@
 "use client";
 
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { PageHeader, SectionGate } from "../../../components/app-shell.tsx";
+import { Page, SectionGate } from "../../../components/app-shell.tsx";
 import { useSession } from "../../../components/session.tsx";
 import { MyCourses, useMyCourses } from "../../../components/training/my-courses.tsx";
 import { AdmissionRulesEditor, Assignments, Catalog, TeamProgress } from "../../../components/training/staff.tsx";
 import { FormMessage } from "../../../components/ui/field.tsx";
-import { t, type MessageKey } from "../../../i18n/index.ts";
-import { cn } from "../../../lib/utils.ts";
+import { Tabs, useTab, type TabItem } from "../../../components/ui/tabs.tsx";
+import { t } from "../../../i18n/index.ts";
 
-const STAFF_TABS = [
-    { key: "team", label: "training.team" },
-    { key: "catalog", label: "training.catalog" },
-    { key: "assignments", label: "training.assignments" },
-    { key: "rules", label: "training.rules" },
-    { key: "mine", label: "training.myCourses" },
-] as const satisfies ReadonlyArray<{ key: string; label: MessageKey }>;
+type TabKey = "team" | "catalog" | "assignments" | "rules" | "mine";
 
-type TabKey = (typeof STAFF_TABS)[number]["key"];
+const STAFF_TABS: ReadonlyArray<TabItem<TabKey>> = [
+    { key: "team", label: t("training.team") },
+    { key: "catalog", label: t("training.catalog") },
+    { key: "assignments", label: t("training.assignments") },
+    { key: "rules", label: t("training.rules") },
+    { key: "mine", label: t("training.myCourses") },
+];
 
 export default function TrainingPage() {
     return (
-        <SectionGate section="training">
+        <SectionGate section="training" title={t("training.title")}>
             <Training />
         </SectionGate>
     );
@@ -29,46 +28,22 @@ export default function TrainingPage() {
 
 function Training() {
     const { me } = useSession();
-    const staff = me.user.role !== "employee";
     const mine = useMyCourses();
-    const params = useSearchParams();
-    const router = useRouter();
-    const pathname = usePathname() ?? "/training";
-    const requested = params?.get("tab");
-    const tab: TabKey = STAFF_TABS.some((item) => item.key === requested) ? (requested as TabKey) : "team";
+    // Сотруднику правила допуска показываются здесь же подробно, общая плашка не нужна.
+    return <Page title={t("training.title")} admissionBanner={me.user.role !== "employee"}>{me.user.role === "employee" ? <MyCourses data={mine} /> : <StaffTraining mine={mine} />}</Page>;
+}
 
-    if (!staff) {
-        return (
-            <>
-                <PageHeader title={t("training.title")} />
-                <MyCourses data={mine} />
-            </>
-        );
-    }
-
+function StaffTraining({ mine }: { mine: ReturnType<typeof useMyCourses> }) {
+    const [tab, setTab] = useTab(STAFF_TABS);
     const missing = mine.data?.admission.missingCourses ?? [];
     return (
         <>
-            <PageHeader title={t("training.title")} />
             {missing.length > 0 ? (
-                <div className="mb-3">
+                <div className="mb-4">
                     <FormMessage kind="info">{t("training.firstSetup", { course: missing.join(", ") })}</FormMessage>
                 </div>
             ) : null}
-            <div role="tablist" aria-label={t("training.title")} className="mb-3 flex gap-1 overflow-x-auto border-b border-border">
-                {STAFF_TABS.map((item) => (
-                    <button
-                        key={item.key}
-                        role="tab"
-                        type="button"
-                        aria-selected={tab === item.key}
-                        onClick={() => router.replace(`${pathname}?tab=${item.key}`, { scroll: false })}
-                        className={cn("-mb-px shrink-0 border-b-2 px-3 py-1.5 text-sm whitespace-nowrap", tab === item.key ? "border-primary font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}
-                    >
-                        {t(item.label)}
-                    </button>
-                ))}
-            </div>
+            <Tabs items={STAFF_TABS} value={tab} onChange={setTab} label={t("training.title")} />
             {tab === "team" ? <TeamProgress /> : null}
             {tab === "catalog" ? <Catalog /> : null}
             {tab === "assignments" ? <Assignments /> : null}

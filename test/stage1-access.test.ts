@@ -253,3 +253,36 @@ test("восстановление пароля по коду от руково�
     assert.equal((await other.get("/api/me")).status, 401);
     assert.equal((await anon.get("/api/me")).status, 200);
 });
+
+test("настройки системы: срок приглашений, своё имя, подключения без раскрытия секретов", async () => {
+    const env = createTestEnv({ WHAPI_TOKEN: "whapi-secret-value" });
+    const owner = new TestClient(env, "10.9.9.9");
+    const tooLong = await owner.post("/api/owner/activation-links", { code: OWNER_CODE, ttlHours: 500 });
+    assert.equal(tooLong.status, 400);
+    const short = await owner.post<{ expiresAt: number }>("/api/owner/activation-links", { code: OWNER_CODE, ttlHours: 2 });
+    assert.equal(short.status, 200);
+    assert.ok(Math.abs(short.body.expiresAt - Date.now() - 2 * 3_600_000) < 60_000, "срок ссылки владельца — заданные 2 часа");
+
+    const director = await bootstrapDirector(env);
+    const branch = await director.post<{ branch: { id: string } }>("/api/branches", { name: "Центр" });
+    const invitation = await director.post<{ expiresAt: number }>("/api/invitations", { role: "employee", branchId: branch.body.branch.id, ttlHours: 24 });
+    assert.ok(Math.abs(invitation.body.expiresAt - Date.now() - 24 * 3_600_000) < 60_000, "срок приглашения — 24 часа");
+
+    assert.equal((await director.patch("/api/me", { displayName: "А" })).status, 400);
+    assert.equal((await director.patch("/api/me", { displayName: "Айгерим Новая" })).status, 200);
+    const me = await director.get<{ user: { displayName: string }; sections: Record<string, boolean> }>("/api/me");
+    assert.equal(me.body.user.displayName, "Айгерим Новая");
+    assert.equal(me.body.sections["settings"], true);
+
+    const connections = await director.get<Record<string, boolean>>("/api/company/connections");
+    assert.deepEqual(connections.body, { integration: true, storage: true, whapi: true, model: false, ownerCode: true });
+    assert.ok(!JSON.stringify(connections.body).includes("whapi-secret-value"), "значение секрета не уходит в браузер");
+
+    const manager = await invite(env, director, { role: "manager", branchId: branch.body.branch.id }, "center.manager");
+    const employee = await invite(env, manager, { role: "employee" }, "center.employee");
+    assert.equal((await manager.get("/api/company/connections")).status, 403);
+    assert.equal((await manager.get("/api/sections/settings")).status, 200, "руководителю доступны участники и приглашения");
+    assert.equal((await manager.patch("/api/company", { name: "Взлом", timezone: "UTC" })).status, 403);
+    assert.equal((await employee.get("/api/sections/settings")).status, 403);
+    assert.equal((await employee.patch("/api/me", { displayName: "Сотрудник Переименованный" })).status, 200, "своё имя меняет любой");
+});

@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
-import { PageHeader, SectionGate } from "../../../../components/app-shell.tsx";
+import { Page, SectionGate } from "../../../../components/app-shell.tsx";
 import { RichText } from "../../../../components/rich-text.tsx";
 import { ProgressBar } from "../../../../components/training/progress-bar.tsx";
 import { Button, buttonVariants } from "../../../../components/ui/button.tsx";
-import { Badge, Card, CardContent, Spinner } from "../../../../components/ui/card.tsx";
+import { StatusPill } from "../../../../components/ui/badge.tsx";
+import { Card, Spinner } from "../../../../components/ui/card.tsx";
 import { ErrorRetry } from "../../../../components/ui/error-retry.tsx";
 import { FormMessage } from "../../../../components/ui/field.tsx";
 import { t } from "../../../../i18n/index.ts";
@@ -37,7 +38,7 @@ function formatSize(bytes: number) {
 
 export default function CoursePage() {
     return (
-        <SectionGate section="training">
+        <SectionGate section="training" title={t("training.title")}>
             <Course />
         </SectionGate>
     );
@@ -63,60 +64,71 @@ function Course() {
         }
     }
 
-    if (data.error && !data.data) return <ErrorRetry message={data.error} onRetry={data.reload} />;
-    if (!data.data) return <Spinner label={t("common.loading")} />;
+    if (data.error && !data.data) {
+        return (
+            <Page title={t("training.title")}>
+                <ErrorRetry message={data.error} onRetry={data.reload} />
+            </Page>
+        );
+    }
+    if (!data.data) {
+        return (
+            <Page title={t("training.title")}>
+                <Spinner label={t("common.loading")} />
+            </Page>
+        );
+    }
     const course = data.data.course;
+    const firstOpen = course.lessons.findIndex((item) => !item.completed);
     return (
-        <>
-            <p className="mb-2 text-sm">
-                <Link href="/training" className="text-primary hover:underline">
+        <Page title={course.title}>
+            <div className="grid max-w-4xl gap-4">
+                <Link href="/training" className="text-sm font-medium text-primary hover:underline">
                     ← {t("training.backToList")}
                 </Link>
-            </p>
-            <PageHeader
-                title={course.title}
-                actions={
-                    <Link href={`/training/${course.id}/test`} className={buttonVariants({ variant: "primary" })}>
-                        {course.openAttempt ? t("training.continueTest") : t("training.startTest")}
-                    </Link>
-                }
-            >
-                <p className="text-sm text-muted-foreground">
-                    {t("training.version", { version: course.version })} · {t("training.questions", { count: course.questions })} · {t("training.minScore", { percent: course.minScorePercent })}
-                </p>
-            </PageHeader>
-            <div className="grid max-w-3xl gap-3">
-                {course.description ? <p className="text-sm break-anywhere">{course.description}</p> : null}
-                {course.requiredForAdmission ? (
-                    <div>
-                        <Badge tone="primary">{t("training.requiredForAdmission")}</Badge>
+                <Card className="grid gap-3 p-5">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0">
+                            <p className="text-[13px] text-muted-foreground">
+                                {t("training.version", { version: course.version })} · {t("training.questions", { count: course.questions })} · {t("training.minScore", { percent: course.minScorePercent })}
+                            </p>
+                            {course.description ? <p className="mt-1 text-sm break-anywhere">{course.description}</p> : null}
+                        </div>
+                        <Link href={`/training/${course.id}/test`} className={buttonVariants({ variant: "primary" })}>
+                            {course.openAttempt ? t("training.continueTest") : t("training.startTest")}
+                        </Link>
                     </div>
-                ) : null}
-                <ProgressBar percent={course.progress.percent} label={t("training.lessonsProgress", { done: course.progress.completed, total: course.progress.total })} />
+                    {course.requiredForAdmission ? (
+                        <div>
+                            <StatusPill tone="info">{t("training.requiredForAdmission")}</StatusPill>
+                        </div>
+                    ) : null}
+                    <ProgressBar percent={course.progress.percent} label={t("training.lessonsProgress", { done: course.progress.completed, total: course.progress.total })} />
+                </Card>
                 {error ? <FormMessage kind="error">{error}</FormMessage> : null}
-                <h2 className="mt-2 text-base font-semibold">{t("training.lessons")}</h2>
+                <h2 className="mt-1 text-[17px] font-bold">{t("training.lessons")}</h2>
                 {course.lessons.map((lesson, index) => (
-                    <Card key={lesson.key} id={`lesson-${lesson.key}`}>
-                        <details open={!lesson.completed && course.lessons.findIndex((item) => !item.completed) === index}>
-                            <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2 px-4 py-3">
-                                <span className="font-medium break-anywhere">
+                    <Card key={lesson.key} id={`lesson-${lesson.key}`} className="overflow-hidden">
+                        <details open={!lesson.completed && firstOpen === index}>
+                            <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2 px-5 py-4">
+                                <span className="font-bold break-anywhere">
                                     {index + 1}. {lesson.title}
-                                    {lesson.durationMinutes ? <span className="ml-2 text-xs font-normal text-muted-foreground">{t("training.minutes", { count: lesson.durationMinutes })}</span> : null}
+                                    {lesson.durationMinutes ? <span className="ml-2 text-[13px] font-normal text-muted-foreground">{t("training.minutes", { count: lesson.durationMinutes })}</span> : null}
                                 </span>
-                                <Badge tone={lesson.completed ? "success" : "neutral"}>{lesson.completed ? t("training.done") : t("training.notDone")}</Badge>
+                                <StatusPill tone={lesson.completed ? "success" : "neutral"}>{lesson.completed ? t("training.done") : t("training.notDone")}</StatusPill>
                             </summary>
-                            <CardContent className="grid gap-3 border-t border-border">
+                            <div className="grid gap-4 border-t border-border px-5 py-4">
                                 {lesson.body ? <RichText text={lesson.body} /> : null}
                                 {lesson.files.length ? (
                                     <div>
-                                        <p className="mb-1 text-xs font-medium text-muted-foreground">{t("training.files")}</p>
+                                        <p className="mb-1.5 text-[13px] font-semibold text-foreground/75">{t("training.files")}</p>
                                         <ul className="grid gap-1 text-sm">
                                             {lesson.files.map((file) => (
                                                 <li key={file.id}>
-                                                    <a className="text-primary hover:underline break-anywhere" href={`/api/training/files/${file.id}`} target="_blank" rel="noopener">
+                                                    <a className="font-medium text-primary hover:underline break-anywhere" href={`/api/training/files/${file.id}`} target="_blank" rel="noopener">
                                                         {file.filename}
                                                     </a>{" "}
-                                                    <span className="text-xs text-muted-foreground">({formatSize(file.size)})</span>
+                                                    <span className="text-[13px] text-muted-foreground">({formatSize(file.size)})</span>
                                                 </li>
                                             ))}
                                         </ul>
@@ -129,11 +141,11 @@ function Course() {
                                         </Button>
                                     </div>
                                 ) : null}
-                            </CardContent>
+                            </div>
                         </details>
                     </Card>
                 ))}
             </div>
-        </>
+        </Page>
     );
 }

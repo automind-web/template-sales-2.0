@@ -1,24 +1,34 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import type { LucideIcon } from "lucide-react";
 import { t } from "../i18n/index.ts";
-import { api, errorMessage } from "../lib/api.ts";
-import { Card, CardContent } from "./ui/card.tsx";
+import { api } from "../lib/api.ts";
+import { useApiData } from "../lib/use-api.ts";
+import { Page, SectionGate } from "./app-shell.tsx";
 import type { Section } from "./session.tsx";
+import { Card, EmptyState, Spinner } from "./ui/card.tsx";
+import { ErrorRetry } from "./ui/error-retry.tsx";
 
-/** Заглушка раздела следующего этапа. Доступ всё равно подтверждается сервером. */
-export function ComingSoon({ section }: { section: Section }) {
-    const [state, setState] = useState<"checking" | "ok" | string>("checking");
-    useEffect(() => {
-        api(`/api/sections/${section}`)
-            .then(() => setState("ok"))
-            .catch((caught: unknown) => setState(errorMessage(caught)));
-    }, [section]);
+/** Раздел следующего этапа. Доступ к нему всё равно подтверждается сервером. */
+export function StagePlaceholder({ section, title, icon }: { section: Section; title: string; icon: LucideIcon }) {
+    return (
+        <SectionGate section={section} title={title}>
+            <Page title={title}>
+                <Check section={section} icon={icon} />
+            </Page>
+        </SectionGate>
+    );
+}
+
+function Check({ section, icon }: { section: Section; icon: LucideIcon }) {
+    const access = useApiData(`section-${section}`, (signal) => api(`/api/sections/${section}`, { signal }));
+    if (access.error) return <ErrorRetry message={access.error} onRetry={access.reload} />;
+    if (!access.data) return <Spinner label={t("common.loading")} />;
     return (
         <Card>
-            <CardContent className="text-sm text-muted-foreground">
-                {state === "checking" ? t("common.loading") : state === "ok" ? t("shell.comingSoon") : <span role="alert" className="text-danger">{state}</span>}
-            </CardContent>
+            <EmptyState icon={icon} title={t("shell.comingSoonTitle")}>
+                {t("shell.comingSoon")}
+            </EmptyState>
         </Card>
     );
 }

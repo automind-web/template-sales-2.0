@@ -7,7 +7,7 @@ import { Button } from "./ui/button.tsx";
 import { Spinner } from "./ui/card.tsx";
 import { FormMessage } from "./ui/field.tsx";
 
-export type Section = "training" | "profile" | "crm" | "kpi" | "stats" | "whatsapp" | "team" | "branches" | "settings";
+export type Section = "training" | "crm" | "kpi" | "stats" | "whatsapp" | "settings" | "profile";
 export type Role = "director" | "manager" | "employee";
 
 export type Me = {

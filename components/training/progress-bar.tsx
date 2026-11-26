@@ -2,13 +2,13 @@
 export function ProgressBar({ percent, label }: { percent: number; label: string }) {
     const value = Math.max(0, Math.min(100, percent));
     return (
-        <div className="grid gap-1">
-            <div className="flex justify-between text-xs text-muted-foreground">
+        <div className="grid gap-1.5">
+            <div className="flex justify-between gap-2 text-[13px] text-muted-foreground">
                 <span>{label}</span>
-                <span>{value}%</span>
+                <span className="font-semibold text-foreground/80">{value}%</span>
             </div>
             <div role="progressbar" aria-valuenow={value} aria-valuemin={0} aria-valuemax={100} aria-label={label} className="h-1.5 overflow-hidden rounded-full bg-muted">
-                <div className="h-full bg-primary" style={{ width: `${value}%` }} />
+                <div className="h-full rounded-full bg-primary" style={{ width: `${value}%` }} />
             </div>
         </div>
     );

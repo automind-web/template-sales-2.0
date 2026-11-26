@@ -1,14 +1,9 @@
 "use client";
 
-import { PageHeader, SectionGate } from "../../../components/app-shell.tsx";
-import { ComingSoon } from "../../../components/coming-soon.tsx";
+import { MessageCircle } from "lucide-react";
+import { StagePlaceholder } from "../../../components/coming-soon.tsx";
 import { t } from "../../../i18n/index.ts";
 
 export default function Page() {
-    return (
-        <SectionGate section="whatsapp">
-            <PageHeader title={t("nav.whatsapp")} />
-            <ComingSoon section="whatsapp" />
-        </SectionGate>
-    );
+    return <StagePlaceholder section="whatsapp" title={t("nav.whatsapp")} icon={MessageCircle} />;
 }

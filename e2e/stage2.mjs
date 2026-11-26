@@ -12,7 +12,7 @@ const H = { "x-asc-request": "1" };
 const browser = await chromium.launch();
 const errors = [];
 async function ctx(opts = {}) {
-  const c = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 1280, height: 800 }, ...opts });
+  const c = await browser.newContext({ deviceScaleFactor: 1, viewport: { width: 1440, height: 900 }, ...opts });
   const p = await c.newPage();
   p.on("pageerror", (e) => errors.push(e.message));
   p.on("console", (m) => { if (m.type() === "error" && !/eval\(\)|Failed to load resource/.test(m.text())) errors.push(m.text()); });
@@ -134,14 +134,15 @@ log("ok: подтверждение при неотвеченных вопрос
 // Директор: прогресс, каталог, правила
 await dir.p.goto(BASE + "/training");
 await dir.p.getByText("Константин Длиннофамильный-Сотрудниковский").waitFor();
-await dir.p.locator("li", { hasText: "Константин" }).getByText("Допущен").waitFor();
-await dir.p.locator("li", { hasText: "Константин" }).getByText("Тест начат").waitFor();
-await dir.p.locator("li", { hasText: "Константин" }).getByText(/Последний: 100% \(ред\. 1\)/).waitFor();
+await dir.p.locator("tr", { hasText: "Константин" }).getByText("Допущен").waitFor();
+await dir.p.locator("tr", { hasText: "Константин" }).getByText("Тест начат").waitFor();
+await dir.p.locator("tr", { hasText: "Константин" }).getByText("100% · ред. 1").waitFor();
 await dir.p.screenshot({ path: SHOTS + "/s2-director-team.png" });
 log("ok: директор видит прогресс, результат и версию");
 await dir.p.getByRole("tab", { name: "Курсы и версии" }).click();
-await dir.p.getByText("Редакция 2 · уроков 2").waitFor();
-await dir.p.getByText("Редакция 1 · уроков 2").waitFor();
+await dir.p.getByRole("cell", { name: "Редакция 2" }).waitFor();
+await dir.p.getByRole("cell", { name: "Редакция 1" }).waitFor();
+await dir.p.screenshot({ path: SHOTS + "/s2-director-catalog.png" });
 log("ok: история редакций");
 await dir.p.getByRole("tab", { name: "Правила допуска" }).click();
 await dir.p.getByText("Сейчас действуют правила по умолчанию").waitFor();

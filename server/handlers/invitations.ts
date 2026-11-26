@@ -23,6 +23,18 @@ export function invitationStatus(row: Pick<InvitationRow, "usedAt" | "revokedAt"
 }
 
 const HOUR_MS = 60 * 60_000;
+const MAX_TTL_HOURS = 168;
+
+/** Срок действия ссылки в часах: 1–168, по умолчанию из config/company.ts */
+function readTtlHours(body: Record<string, unknown>, fallback: number): number {
+    const raw = body["ttlHours"];
+    if (raw === undefined || raw === null || raw === "") return fallback;
+    const value = typeof raw === "string" ? Number(raw) : raw;
+    if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > MAX_TTL_HOURS) {
+        throw badRequest("validation.ttlRange", { ttlHours: "validation.ttlRange" });
+    }
+    return value;
+}
 
 async function issueInvitation(
     ctx: Ctx,
@@ -72,6 +84,7 @@ export async function ownerIssueActivation(ctx: Ctx) {
         throw new AppError(403, "owner.invalidCode", { fields: { code: "owner.invalidCode" } });
     }
     const note = optStr(body, "note", 200);
+    const ttlHours = readTtlHours(body, companyConfig.activationLinkTtlHours);
     let company = await ctx.db.select().from(companies).orderBy(companies.createdAt).limit(1).get();
     if (!company) {
         const name = optStr(body, "companyName", 120) ?? companyConfig.name;
@@ -94,7 +107,7 @@ export async function ownerIssueActivation(ctx: Ctx) {
         role: "director",
         note,
         createdBy: null,
-        ttlHours: companyConfig.activationLinkTtlHours,
+        ttlHours,
     });
     return { path: issued.path, expiresAt: issued.expiresAt, companyName: company.name };
 }
@@ -242,7 +255,7 @@ export async function createInvitation(ctx: Ctx) {
         role,
         note,
         createdBy: actor.userId,
-        ttlHours: companyConfig.invitationTtlHours,
+        ttlHours: readTtlHours(body, companyConfig.invitationTtlHours),
     });
 }
 

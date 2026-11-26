@@ -1,15 +1,19 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
-import { PageHeader } from "../../../components/app-shell.tsx";
+import { Page } from "../../../components/app-shell.tsx";
 import { useSession } from "../../../components/session.tsx";
-import { Button } from "../../../components/ui/button.tsx";
-import { Badge, Card, CardContent, CardHeader, CardTitle, Spinner } from "../../../components/ui/card.tsx";
-import { Field, FormMessage } from "../../../components/ui/field.tsx";
+import { StatusDot, Tag } from "../../../components/ui/badge.tsx";
+import { Button, buttonVariants } from "../../../components/ui/button.tsx";
+import { Meta, Section, Spinner } from "../../../components/ui/card.tsx";
+import { ErrorRetry } from "../../../components/ui/error-retry.tsx";
+import { Field, FieldGrid, FormMessage } from "../../../components/ui/field.tsx";
 import { Form } from "../../../components/ui/form.tsx";
-import { Input } from "../../../components/ui/input.tsx";
+import { Input, Label } from "../../../components/ui/input.tsx";
 import { formatDateTime, t, type MessageKey } from "../../../i18n/index.ts";
-import { api, ApiError, errorMessage } from "../../../lib/api.ts";
+import { api, errorMessage } from "../../../lib/api.ts";
+import { useAction } from "../../../lib/use-action.ts";
 import { useApiData } from "../../../lib/use-api.ts";
 
 type SessionRow = { id: string; current: boolean; createdAt: number; lastSeenAt: number; userAgent: string | null };
@@ -17,138 +21,174 @@ type SessionRow = { id: string; current: boolean; createdAt: number; lastSeenAt:
 export default function ProfilePage() {
     const { me } = useSession();
     return (
-        <>
-            <PageHeader title={t("profile.title")} />
-            <div className="grid max-w-3xl gap-3">
-                <Card>
-                    <CardContent className="grid gap-1 text-sm">
-                        <div className="text-base font-semibold break-anywhere">{me.user.displayName}</div>
-                        <div className="text-muted-foreground break-anywhere">
-                            {t("common.login")}: {me.user.login} · {t(`role.${me.user.role}` as MessageKey)}
-                            {me.user.branchName ? ` · ${me.user.branchName}` : ""}
+        <Page title={t("profile.title")}>
+            <div className="grid max-w-4xl gap-4">
+                <PersonalData />
+                {me.user.role === "employee" ? (
+                    <Section title={t("profile.admission")}>
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <StatusDot tone={me.user.admitted ? "success" : "warning"}>{me.user.admitted ? t("profile.admitted") : t("profile.notAdmitted")}</StatusDot>
+                            {!me.user.admitted ? (
+                                <Link href="/training" className={buttonVariants({ variant: "secondary" })}>
+                                    {t("nav.training")}
+                                </Link>
+                            ) : null}
                         </div>
-                        {me.user.role === "employee" ? (
-                            <div className="flex items-center gap-2">
-                                <span>{t("profile.admission")}:</span>
-                                <Badge tone={me.user.admitted ? "primary" : "warning"}>{me.user.admitted ? t("team.admitted") : t("team.notAdmitted")}</Badge>
-                            </div>
-                        ) : null}
-                    </CardContent>
-                </Card>
+                    </Section>
+                ) : null}
                 <ChangePassword />
                 <Sessions />
+                <Footer />
             </div>
-        </>
+        </Page>
+    );
+}
+
+function PersonalData() {
+    const { me, reload } = useSession();
+    const [name, setName] = useState(me.user.displayName);
+    const action = useAction();
+    const changed = name.trim() !== me.user.displayName;
+    const branch = me.user.role === "director" ? t("profile.allBranches") : (me.user.branchName ?? t("common.none"));
+    return (
+        <Section title={t("profile.personal")}>
+            <div className="grid gap-4 sm:grid-cols-2">
+                <Meta label={t("profile.company")}>{me.company.name}</Meta>
+                <Meta label={t("common.role")}>{t(`role.${me.user.role}` as MessageKey)}</Meta>
+                <Meta label={t("common.branch")}>{branch}</Meta>
+                <Meta label={t("common.login")}>{me.user.login}</Meta>
+            </div>
+            <form
+                className="mt-4 grid gap-1.5"
+                onSubmit={(event) => {
+                    event.preventDefault();
+                    if (changed) void action.run(async () => api("/api/me", { method: "PATCH", body: { displayName: name } }).then(reload));
+                }}
+            >
+                <Label htmlFor="profile-name">{t("common.name")}</Label>
+                <div className="flex gap-2">
+                    <Input id="profile-name" value={name} maxLength={80} autoComplete="name" aria-invalid={action.error ? true : undefined} onChange={(event) => setName(event.target.value)} />
+                    <Button type="submit" variant="secondary" disabled={!changed || action.busy}>
+                        {t("common.save")}
+                    </Button>
+                </div>
+                {action.error ? (
+                    <p role="alert" className="text-xs font-semibold text-danger">
+                        {action.fields["displayName"] ?? action.error}
+                    </p>
+                ) : null}
+            </form>
+        </Section>
     );
 }
 
 function ChangePassword() {
-    const [form, setForm] = useState({ currentPassword: "", newPassword: "", repeat: "" });
-    const [busy, setBusy] = useState(false);
-    const [message, setMessage] = useState<{ kind: "error" | "success"; text: string } | null>(null);
-    const [fields, setFields] = useState<Record<string, string>>({});
-
-    async function submit() {
-        setMessage(null);
-        if (form.newPassword !== form.repeat) {
-            setFields({ repeat: t("validation.passwordMismatch") });
-            return;
-        }
-        setBusy(true);
-        setFields({});
-        try {
-            await api("/api/me/password", { method: "POST", body: { currentPassword: form.currentPassword, newPassword: form.newPassword } });
-            setForm({ currentPassword: "", newPassword: "", repeat: "" });
-            setMessage({ kind: "success", text: t("profile.passwordChanged") });
-        } catch (caught) {
-            setMessage({ kind: "error", text: errorMessage(caught) });
-            if (caught instanceof ApiError) setFields(caught.fields);
-        } finally {
-            setBusy(false);
-        }
-    }
+    const [form, setForm] = useState({ currentPassword: "", newPassword: "" });
+    const [done, setDone] = useState(false);
+    const action = useAction();
     const update = (key: keyof typeof form, value: string) => setForm((current) => ({ ...current, [key]: value }));
-
     return (
-        <Card>
-            <CardHeader>
-                <CardTitle>{t("profile.changePassword")}</CardTitle>
-            </CardHeader>
-            <CardContent>
-                <Form onSubmit={submit} busy={busy} canSubmit={Object.values(form).every((value) => value !== "")}>
-                    {message ? <FormMessage kind={message.kind}>{message.text}</FormMessage> : null}
-                    <Field label={t("profile.currentPassword")} error={fields["currentPassword"]}>
+        <Section title={t("profile.password")}>
+            <Form
+                submitLabel={t("profile.changePassword")}
+                busy={action.busy}
+                canSubmit={form.currentPassword !== "" && form.newPassword !== ""}
+                onSubmit={async () => {
+                    setDone(false);
+                    if (await action.run(async () => api("/api/me/password", { method: "POST", body: form }))) {
+                        setForm({ currentPassword: "", newPassword: "" });
+                        setDone(true);
+                    }
+                }}
+            >
+                {action.error ? <FormMessage kind="error">{action.error}</FormMessage> : null}
+                {done ? <FormMessage kind="success">{t("profile.passwordChanged")}</FormMessage> : null}
+                <FieldGrid>
+                    <Field label={t("profile.currentPassword")} error={action.fields["currentPassword"]}>
                         <Input type="password" autoComplete="current-password" value={form.currentPassword} onChange={(event) => update("currentPassword", event.target.value)} />
                     </Field>
-                    <Field label={t("profile.newPassword")} hint={t("invite.passwordHint")} error={fields["newPassword"]}>
+                    <Field label={t("profile.newPassword")} hint={t("invite.passwordHint")} error={action.fields["newPassword"]}>
                         <Input type="password" autoComplete="new-password" value={form.newPassword} onChange={(event) => update("newPassword", event.target.value)} />
                     </Field>
-                    <Field label={t("invite.passwordRepeat")} error={fields["repeat"]}>
-                        <Input type="password" autoComplete="new-password" value={form.repeat} onChange={(event) => update("repeat", event.target.value)} />
-                    </Field>
-                </Form>
-            </CardContent>
-        </Card>
+                </FieldGrid>
+            </Form>
+        </Section>
     );
 }
 
 function Sessions() {
     const { me } = useSession();
-    const [actionError, setActionError] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
     const list = useApiData("sessions", (signal) => api<{ sessions: SessionRow[] }>("/api/me/sessions", { signal }).then((result) => result.sessions));
-    const rows = list.data;
-    const error = list.error ?? actionError;
-    const load = async () => {
-        setActionError(null);
-        list.reload();
-    };
 
     async function revoke(row: SessionRow) {
+        setError(null);
         try {
             await api(`/api/me/sessions/${row.id}`, { method: "DELETE" });
             if (row.current) window.location.assign("/login");
-            else await load();
+            else list.reload();
         } catch (caught) {
-            setActionError(errorMessage(caught));
+            setError(errorMessage(caught));
         }
     }
 
     return (
-        <Card>
-            <CardHeader>
-                <CardTitle>{t("profile.sessions")}</CardTitle>
-            </CardHeader>
+        <Section title={t("profile.sessions")}>
             {error ? (
-                <CardContent className="flex flex-wrap items-center gap-2">
+                <div className="mb-3">
                     <FormMessage kind="error">{error}</FormMessage>
-                    <Button variant="secondary" onClick={() => void load()}>
-                        {t("common.retry")}
-                    </Button>
-                </CardContent>
-            ) : rows === null ? (
-                <CardContent>
-                    <Spinner label={t("common.loading")} />
-                </CardContent>
+                </div>
+            ) : null}
+            {list.error && !list.data ? (
+                <ErrorRetry message={list.error} onRetry={list.reload} />
+            ) : !list.data ? (
+                <Spinner label={t("common.loading")} />
             ) : (
-                <ul className="divide-y divide-border">
-                    {rows.map((row) => (
-                        <li key={row.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 text-sm">
+                <ul className="-mx-5 -mb-5 divide-y divide-border border-t border-border">
+                    {list.data.map((row) => (
+                        <li key={row.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-3 text-sm">
                             <div className="min-w-0 flex-1">
                                 <div className="truncate" title={row.userAgent ?? ""}>
-                                    {row.userAgent ?? t("profile.device")}
+                                    {row.userAgent ?? t("profile.device")} {row.current ? <Tag>{t("profile.thisSession")}</Tag> : null}
                                 </div>
-                                <div className="text-xs text-muted-foreground">
+                                <div className="text-[13px] text-muted-foreground">
                                     {t("profile.lastSeen")}: {formatDateTime(row.lastSeenAt, me.company.timezone)}
                                 </div>
                             </div>
-                            {row.current ? <Badge tone="primary">{t("profile.thisSession")}</Badge> : null}
-                            <Button variant="danger-ghost" size="sm" onClick={() => void revoke(row)}>
+                            <Button variant="danger" size="sm" onClick={() => void revoke(row)}>
                                 {t("profile.revokeSession")}
                             </Button>
                         </li>
                     ))}
                 </ul>
             )}
-        </Card>
+        </Section>
+    );
+}
+
+function Footer() {
+    const { me } = useSession();
+    async function logout() {
+        try {
+            await api("/api/auth/logout", { method: "POST" });
+        } finally {
+            window.location.assign("/login");
+        }
+    }
+    return (
+        <Section>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+                {me.sections.settings ? (
+                    <Link href="/settings" className={buttonVariants({ variant: "secondary" })}>
+                        {t("nav.settings")}
+                    </Link>
+                ) : (
+                    <span />
+                )}
+                <Button variant="danger" onClick={() => void logout()}>
+                    {t("nav.logout")}
+                </Button>
+            </div>
+        </Section>
     );
 }

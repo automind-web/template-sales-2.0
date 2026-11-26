@@ -1,25 +1,24 @@
 "use client";
 
-import { useState } from "react";
+import { BookOpen, Users } from "lucide-react";
+import { Fragment, useState } from "react";
 import { formatDateTime, t } from "../../i18n/index.ts";
-import { api, ApiError, errorMessage } from "../../lib/api.ts";
+import { api, errorMessage } from "../../lib/api.ts";
+import { useAction } from "../../lib/use-action.ts";
 import { useApiData } from "../../lib/use-api.ts";
 import { useSession } from "../session.tsx";
+import { useBranchQuery } from "../settings/members.tsx";
+import { StatusPill } from "../ui/badge.tsx";
 import { Button } from "../ui/button.tsx";
-import { Badge, Card, CardContent, CardHeader, CardTitle, EmptyState, Spinner } from "../ui/card.tsx";
+import { Card, EmptyState, Spinner } from "../ui/card.tsx";
 import { Dialog } from "../ui/dialog.tsx";
 import { ErrorRetry } from "../ui/error-retry.tsx";
-import { Field, FormMessage } from "../ui/field.tsx";
+import { Field, FieldGrid, FormMessage } from "../ui/field.tsx";
 import { Form } from "../ui/form.tsx";
 import { Input, Select } from "../ui/input.tsx";
-import { AdmissionRulesStatus } from "./my-courses.tsx";
-import { ProgressBar } from "./progress-bar.tsx";
+import { ListCard, ListRow, Table, Td, Th, THead, Tr } from "../ui/table.tsx";
+import { AdmissionRulesStatus, CourseStatus } from "./my-courses.tsx";
 import type { RuleStatus } from "./types.ts";
-
-function useBranchQuery() {
-    const { me } = useSession();
-    return me.user.role === "director" && me.selectedBranchId ? `?branchId=${encodeURIComponent(me.selectedBranchId)}` : "";
-}
 
 // --- Прогресс сотрудников ------------------------------------------------
 
@@ -45,6 +44,7 @@ type ProgressRow = {
     }>;
 };
 
+/** Сотрудники × курсы: уроки, попытки, лучший и последний результат, статус */
 export function TeamProgress() {
     const { me } = useSession();
     const query = useBranchQuery();
@@ -54,66 +54,91 @@ export function TeamProgress() {
     if (data.data.employees.length === 0) {
         return (
             <Card>
-                <EmptyState title={t("training.noEmployees")} />
+                <EmptyState icon={Users} title={t("training.noEmployees")} />
             </Card>
         );
     }
     return (
-        <Card aria-busy={data.loading} className={data.loading ? "opacity-60" : undefined}>
-            <ul className="divide-y divide-border">
-                {data.data.employees.map((person) => (
-                    <li key={person.id} className="grid gap-2 px-4 py-3 text-sm">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div className="min-w-0">
-                                <div className="font-medium break-anywhere">{person.displayName}</div>
-                                <div className="text-xs text-muted-foreground break-anywhere">
-                                    {person.login}
-                                    {person.branchName ? ` · ${person.branchName}` : ""}
+        <Table aria-busy={data.loading}>
+            <THead>
+                <tr>
+                    <Th>{t("training.employee")}</Th>
+                    <Th>{t("training.course")}</Th>
+                    <Th>{t("training.lessons")}</Th>
+                    <Th className="text-right">{t("training.attemptsShort")}</Th>
+                    <Th className="text-right">{t("training.best")}</Th>
+                    <Th>{t("training.last")}</Th>
+                    <Th>{t("common.status")}</Th>
+                </tr>
+            </THead>
+            <tbody>
+                {data.data.employees.map((person) => {
+                    const rows = Math.max(1, person.courses.length);
+                    const employeeCell = (
+                        <Td rowSpan={rows} className="min-w-56 align-top">
+                            <div className="font-bold break-anywhere">{person.displayName}</div>
+                            <div className="text-[13px] text-muted-foreground break-anywhere">
+                                {person.login}
+                                {person.branchName ? ` · ${person.branchName}` : ""}
+                            </div>
+                            <div className="mt-1.5">
+                                <StatusPill tone={person.admitted ? "success" : "warning"}>{person.admitted ? t("team.admitted") : t("team.notAdmitted")}</StatusPill>
+                            </div>
+                            {!person.admitted && person.rules.length > 0 ? (
+                                <div className="text-[13px]">
+                                    <AdmissionRulesStatus rules={person.rules} />
                                 </div>
-                            </div>
-                            <Badge tone={person.admitted ? "primary" : "warning"}>{person.admitted ? t("team.admitted") : t("team.notAdmitted")}</Badge>
-                        </div>
-                        {person.courses.length === 0 ? (
-                            <p className="text-xs text-muted-foreground">{t("training.noAssignedCourses")}</p>
-                        ) : (
-                            <div className="grid gap-2 md:grid-cols-2">
-                                {person.courses.map((course) => (
-                                    <div key={course.courseId} className="grid gap-1.5 rounded-md border border-border p-2">
-                                        <div className="flex flex-wrap items-center justify-between gap-1">
-                                            <span className="font-medium break-anywhere">{course.title}</span>
-                                            <span className="flex gap-1">
-                                                {course.inProgress ? <Badge tone="warning">{t("training.inProgress")}</Badge> : null}
-                                                {course.bestPercent !== null ? (
-                                                    <Badge tone={course.passed ? "success" : "danger"}>{course.passed ? t("training.passed") : t("training.notPassed")}</Badge>
-                                                ) : (
-                                                    <Badge>{t("training.noAttempts")}</Badge>
-                                                )}
-                                            </span>
-                                        </div>
-                                        <ProgressBar percent={course.lessons.percent} label={t("training.lessonsProgress", { done: course.lessons.completed, total: course.lessons.total })} />
-                                        <p className="text-xs text-muted-foreground">
-                                            {t("training.attempts", { count: course.attempts })} · {t("training.minScore", { percent: course.minScorePercent })}
-                                            {course.bestPercent !== null ? ` · ${t("training.bestScore", { percent: course.bestPercent })}` : ""}
-                                            {course.lastPercent !== null && course.lastVersion !== null ? ` · ${t("training.lastResult", { percent: course.lastPercent, version: course.lastVersion })}` : ""}
-                                            {course.lastSubmittedAt ? ` · ${formatDateTime(course.lastSubmittedAt, me.company.timezone)}` : ""}
-                                        </p>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                        {!person.admitted && person.rules.length > 0 ? (
-                            <div className="text-xs">
-                                <AdmissionRulesStatus rules={person.rules} />
-                            </div>
-                        ) : null}
-                    </li>
-                ))}
-            </ul>
-        </Card>
+                            ) : null}
+                        </Td>
+                    );
+                    if (person.courses.length === 0) {
+                        return (
+                            <Tr key={person.id}>
+                                {employeeCell}
+                                <Td colSpan={6} className="text-muted-foreground">
+                                    {t("training.noAssignedCourses")}
+                                </Td>
+                            </Tr>
+                        );
+                    }
+                    return (
+                        <Fragment key={person.id}>
+                            {person.courses.map((course, index) => (
+                                <Tr key={course.courseId} className={index > 0 ? "border-t-0" : undefined}>
+                                    {index === 0 ? employeeCell : null}
+                                    <Td className="min-w-48 font-semibold break-anywhere">{course.title}</Td>
+                                    <Td className="whitespace-nowrap">
+                                        {course.lessons.completed} / {course.lessons.total}
+                                    </Td>
+                                    <Td className="text-right">{course.attempts}</Td>
+                                    <Td className="text-right font-semibold whitespace-nowrap">
+                                        {course.bestPercent === null ? t("common.none") : `${course.bestPercent}%`}
+                                        <span className="ml-1 font-normal text-muted-foreground">/ {course.minScorePercent}%</span>
+                                    </Td>
+                                    <Td className="text-[13px] whitespace-nowrap text-muted-foreground">
+                                        {course.lastPercent !== null && course.lastVersion !== null ? (
+                                            <>
+                                                {t("training.lastCell", { percent: course.lastPercent, version: course.lastVersion })}
+                                                {course.lastSubmittedAt ? <div>{formatDateTime(course.lastSubmittedAt, me.company.timezone)}</div> : null}
+                                            </>
+                                        ) : (
+                                            t("common.none")
+                                        )}
+                                    </Td>
+                                    <Td>
+                                        <CourseStatus inProgress={course.inProgress} bestPercent={course.bestPercent} passed={course.passed} />
+                                    </Td>
+                                </Tr>
+                            ))}
+                        </Fragment>
+                    );
+                })}
+            </tbody>
+        </Table>
     );
 }
 
-// --- Каталог курсов ------------------------------------------------------
+// --- Курсы и версии ------------------------------------------------------
 
 type CatalogCourse = {
     id: string;
@@ -127,6 +152,7 @@ export function useCatalog() {
     return useApiData("training-catalog", (signal) => api<{ courses: CatalogCourse[] }>("/api/training/catalog", { signal }));
 }
 
+/** История утверждённых редакций: текущая сверху, прежние не изменяются */
 export function Catalog() {
     const { me } = useSession();
     const data = useCatalog();
@@ -135,35 +161,51 @@ export function Catalog() {
     if (data.data.courses.length === 0) {
         return (
             <Card>
-                <EmptyState title={t("training.catalogEmpty")} />
+                <EmptyState icon={BookOpen} title={t("training.catalogEmptyTitle")}>
+                    {t("training.catalogEmpty")}
+                </EmptyState>
             </Card>
         );
     }
     return (
-        <div className="grid gap-3">
-            {data.data.courses.map((course) => (
-                <Card key={course.id}>
-                    <CardHeader>
-                        <CardTitle>{course.title}</CardTitle>
-                        <span className="font-mono text-xs text-muted-foreground">{course.key}</span>
-                    </CardHeader>
-                    <CardContent>
-                        <p className="mb-1 text-xs font-medium text-muted-foreground">{t("training.versionsHistory")}</p>
-                        <ul className="grid gap-1 text-sm">
-                            {course.versions.map((version, index) => (
-                                <li key={version.id} className="flex flex-wrap items-center gap-2">
-                                    {index === 0 ? <Badge tone="primary">{t("training.version", { version: version.version })}</Badge> : <Badge>{t("training.version", { version: version.version })}</Badge>}
-                                    <span className="text-xs text-muted-foreground break-anywhere">
-                                        {t("training.versionRow", { version: version.version, lessons: version.lessons, questions: version.questions, pass: version.passPercent })} · {formatDateTime(version.createdAt, me.company.timezone)}
-                                        {version.externalRef ? ` · ${version.externalRef}` : ""}
-                                    </span>
-                                </li>
-                            ))}
-                        </ul>
-                    </CardContent>
-                </Card>
-            ))}
-        </div>
+        <Table>
+            <THead>
+                <tr>
+                    <Th>{t("training.course")}</Th>
+                    <Th>{t("training.edition")}</Th>
+                    <Th className="text-right">{t("training.lessons")}</Th>
+                    <Th className="text-right">{t("training.questionsShort")}</Th>
+                    <Th className="text-right">{t("training.passScore")}</Th>
+                    <Th>{t("training.uploaded")}</Th>
+                </tr>
+            </THead>
+            <tbody>
+                {data.data.courses.map((course) => (
+                    <Fragment key={course.id}>
+                        {course.versions.map((version, index) => (
+                            <Tr key={version.id} className={index > 0 ? "border-t-0" : undefined}>
+                                {index === 0 ? (
+                                    <Td rowSpan={course.versions.length} className="min-w-56 align-top">
+                                        <div className="font-bold break-anywhere">{course.title}</div>
+                                        <div className="font-mono text-[13px] text-muted-foreground">{course.key}</div>
+                                    </Td>
+                                ) : null}
+                                <Td className="whitespace-nowrap">
+                                    {index === 0 ? <StatusPill tone="info">{t("training.version", { version: version.version })}</StatusPill> : <span className="pl-2.5 text-muted-foreground">{t("training.version", { version: version.version })}</span>}
+                                </Td>
+                                <Td className="text-right">{version.lessons}</Td>
+                                <Td className="text-right">{version.questions}</Td>
+                                <Td className="text-right">{version.passPercent}%</Td>
+                                <Td className="text-[13px] whitespace-nowrap text-muted-foreground">
+                                    {formatDateTime(version.createdAt, me.company.timezone)}
+                                    {version.externalRef ? <div className="font-mono">{version.externalRef}</div> : null}
+                                </Td>
+                            </Tr>
+                        ))}
+                    </Fragment>
+                ))}
+            </tbody>
+        </Table>
     );
 }
 
@@ -188,11 +230,10 @@ export function Assignments() {
         }
     }
 
-    const scopeLabel = (row: Assignment) =>
-        row.scope === "company" ? t("training.scope.company") : row.scope === "branch" ? `${t("training.scope.branch")}: ${row.branchName ?? ""}` : `${row.userName ?? ""}`;
+    const scopeLabel = (row: Assignment) => (row.scope === "company" ? t("training.scope.company") : row.scope === "branch" ? `${t("training.scope.branch")} · ${row.branchName ?? ""}` : (row.userName ?? ""));
 
     return (
-        <div className="grid gap-3">
+        <div className="grid max-w-5xl gap-4">
             <div>
                 <Button onClick={() => setOpen(true)}>{t("training.assign")}</Button>
             </div>
@@ -203,28 +244,26 @@ export function Assignments() {
                 <Spinner label={t("common.loading")} />
             ) : data.data.assignments.length === 0 ? (
                 <Card>
-                    <EmptyState title={t("training.assignmentsEmpty")} />
+                    <EmptyState title={t("training.assignmentsEmptyTitle")}>{t("training.assignmentsEmpty")}</EmptyState>
                 </Card>
             ) : (
-                <Card>
-                    <ul className="divide-y divide-border">
-                        {data.data.assignments.map((row) => (
-                            <li key={row.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 text-sm">
-                                <div className="min-w-0 flex-1">
-                                    <div className="font-medium break-anywhere">{row.courseTitle}</div>
-                                    <div className="text-xs text-muted-foreground break-anywhere">
-                                        {scopeLabel(row)} · {formatDateTime(row.createdAt, me.company.timezone)}
-                                    </div>
+                <ListCard>
+                    {data.data.assignments.map((row) => (
+                        <ListRow key={row.id}>
+                            <div className="min-w-0 flex-1">
+                                <div className="break-anywhere">
+                                    <span className="font-bold">{row.courseTitle}</span> · {scopeLabel(row)}
                                 </div>
-                                {row.canRemove ? (
-                                    <Button variant="danger-ghost" size="sm" onClick={() => void remove(row.id)}>
-                                        {t("training.remove")}
-                                    </Button>
-                                ) : null}
-                            </li>
-                        ))}
-                    </ul>
-                </Card>
+                                <div className="mt-0.5 text-[13px] text-muted-foreground">{t("training.assignedAt", { date: formatDateTime(row.createdAt, me.company.timezone) })}</div>
+                            </div>
+                            {row.canRemove ? (
+                                <Button variant="danger" size="sm" onClick={() => void remove(row.id)}>
+                                    {t("training.remove")}
+                                </Button>
+                            ) : null}
+                        </ListRow>
+                    ))}
+                </ListCard>
             )}
             {open ? <AssignDialog onClose={() => setOpen(false)} onSaved={data.reload} /> : null}
         </div>
@@ -236,52 +275,41 @@ function AssignDialog({ onClose, onSaved }: { onClose: () => void; onSaved: () =
     const isDirector = me.user.role === "director";
     const catalog = useCatalog();
     const query = useBranchQuery();
-    const people = useApiData(`assign-users${query}`, (signal) => api<{ users: Array<{ id: string; displayName: string; role: string; branchName: string | null }> }>(`/api/users${query}`, { signal }));
+    const people = useApiData(`assign-users${query}`, (signal) => api<{ users: Array<{ id: string; displayName: string; branchName: string | null }> }>(`/api/users${query}`, { signal }));
     const defaultBranch = me.selectedBranchId && me.selectedBranchId !== "*" ? me.selectedBranchId : (me.branches[0]?.id ?? "");
     const [courseId, setCourseId] = useState("");
     const [scope, setScope] = useState<"company" | "branch" | "user">("branch");
     const [branchId, setBranchId] = useState(defaultBranch);
     const [userId, setUserId] = useState("");
-    const [busy, setBusy] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const [fields, setFields] = useState<Record<string, string>>({});
+    const action = useAction();
 
     const courseOptions = catalog.data?.courses.filter((course) => !course.archived && course.versions.length > 0) ?? [];
     const selectedCourse = courseId || courseOptions[0]?.id || "";
     const userOptions = (people.data?.users ?? []).filter((user) => user.id !== me.user.id);
     const selectedUser = userId || userOptions[0]?.id || "";
 
-    async function submit() {
-        setBusy(true);
-        setError(null);
-        setFields({});
-        try {
-            await api("/api/training/assignments", { method: "POST", body: { courseId: selectedCourse, scope, branchId, userId: selectedUser } });
-            onSaved();
-            onClose();
-        } catch (caught) {
-            setError(errorMessage(caught));
-            if (caught instanceof ApiError) setFields(caught.fields);
-            setBusy(false);
-        }
-    }
-
     return (
         <Dialog open onClose={onClose} title={t("training.assignTitle")}>
             <Form
-                onSubmit={submit}
-                busy={busy}
+                variant="dialog"
+                busy={action.busy}
                 canSubmit={selectedCourse !== "" && (scope !== "user" || selectedUser !== "") && (scope !== "branch" || !isDirector || branchId !== "")}
                 submitLabel={t("training.assign")}
                 secondary={
-                    <Button variant="ghost" onClick={onClose}>
+                    <Button variant="secondary" onClick={onClose}>
                         {t("common.cancel")}
                     </Button>
                 }
+                onSubmit={async () => {
+                    if (await action.run(async () => api("/api/training/assignments", { method: "POST", body: { courseId: selectedCourse, scope, branchId, userId: selectedUser } }))) {
+                        onSaved();
+                        onClose();
+                    }
+                }}
             >
-                {error ? <FormMessage kind="error">{error}</FormMessage> : null}
+                {action.error ? <FormMessage kind="error">{action.error}</FormMessage> : null}
                 {catalog.data && courseOptions.length === 0 ? <FormMessage kind="info">{t("training.catalogEmpty")}</FormMessage> : null}
-                <Field label={t("training.course")} error={fields["courseId"]}>
+                <Field label={t("training.course")} error={action.fields["courseId"]}>
                     <Select value={selectedCourse} onChange={(event) => setCourseId(event.target.value)} data-autofocus>
                         {courseOptions.map((course) => (
                             <option key={course.id} value={course.id}>
@@ -290,36 +318,38 @@ function AssignDialog({ onClose, onSaved }: { onClose: () => void; onSaved: () =
                         ))}
                     </Select>
                 </Field>
-                <Field label={t("training.assignScope")} error={fields["scope"]}>
-                    <Select value={scope} onChange={(event) => setScope(event.target.value as typeof scope)}>
-                        {isDirector ? <option value="company">{t("training.scope.company")}</option> : null}
-                        <option value="branch">{t("training.scope.branch")}</option>
-                        <option value="user">{t("training.scope.user")}</option>
-                    </Select>
-                </Field>
-                {scope === "branch" && isDirector ? (
-                    <Field label={t("common.branch")} error={fields["branchId"]}>
-                        <Select value={branchId} onChange={(event) => setBranchId(event.target.value)}>
-                            {me.branches.map((branch) => (
-                                <option key={branch.id} value={branch.id}>
-                                    {branch.name}
-                                </option>
-                            ))}
+                <FieldGrid>
+                    <Field label={t("training.assignScope")} error={action.fields["scope"]}>
+                        <Select value={scope} onChange={(event) => setScope(event.target.value as typeof scope)}>
+                            {isDirector ? <option value="company">{t("training.scope.company")}</option> : null}
+                            <option value="branch">{t("training.scope.branch")}</option>
+                            <option value="user">{t("training.scope.user")}</option>
                         </Select>
                     </Field>
-                ) : null}
-                {scope === "user" ? (
-                    <Field label={t("training.employee")} error={fields["userId"]}>
-                        <Select value={selectedUser} onChange={(event) => setUserId(event.target.value)}>
-                            {userOptions.map((user) => (
-                                <option key={user.id} value={user.id}>
-                                    {user.displayName}
-                                    {user.branchName ? ` — ${user.branchName}` : ""}
-                                </option>
-                            ))}
-                        </Select>
-                    </Field>
-                ) : null}
+                    {scope === "branch" && isDirector ? (
+                        <Field label={t("common.branch")} error={action.fields["branchId"]}>
+                            <Select value={branchId} onChange={(event) => setBranchId(event.target.value)}>
+                                {me.branches.map((branch) => (
+                                    <option key={branch.id} value={branch.id}>
+                                        {branch.name}
+                                    </option>
+                                ))}
+                            </Select>
+                        </Field>
+                    ) : null}
+                    {scope === "user" ? (
+                        <Field label={t("training.employee")} error={action.fields["userId"]}>
+                            <Select value={selectedUser} onChange={(event) => setUserId(event.target.value)}>
+                                {userOptions.map((user) => (
+                                    <option key={user.id} value={user.id}>
+                                        {user.displayName}
+                                        {user.branchName ? ` — ${user.branchName}` : ""}
+                                    </option>
+                                ))}
+                            </Select>
+                        </Field>
+                    ) : null}
+                </FieldGrid>
             </Form>
         </Dialog>
     );
@@ -328,115 +358,110 @@ function AssignDialog({ onClose, onSaved }: { onClose: () => void; onSaved: () =
 // --- Правила допуска -----------------------------------------------------
 
 type RuleRow = { branchId: string | null; courseKey: string; minScorePercent: number; courseTitle: string | null };
+type RulesData = { source: "config" | "company"; canEdit: boolean; rules: RuleRow[] };
 
 export function AdmissionRulesEditor() {
-    const data = useApiData("training-rules", (signal) => api<{ source: "config" | "company"; canEdit: boolean; rules: RuleRow[] }>("/api/training/admission-rules", { signal }));
+    const data = useApiData("training-rules", (signal) => api<RulesData>("/api/training/admission-rules", { signal }));
     if (data.error && !data.data) return <ErrorRetry message={data.error} onRetry={data.reload} />;
     if (!data.data) return <Spinner label={t("common.loading")} />;
     // Форма создаётся один раз: после сохранения строки уже совпадают с сохранёнными, а сообщение не теряется.
     return <RulesForm initial={data.data} onSaved={data.reload} />;
 }
 
-function RulesForm({ initial, onSaved }: { initial: { source: "config" | "company"; canEdit: boolean; rules: RuleRow[] }; onSaved: () => void }) {
+function RulesForm({ initial, onSaved }: { initial: RulesData; onSaved: () => void }) {
     const { me } = useSession();
     const catalog = useCatalog();
     const [rows, setRows] = useState(initial.rules.map((rule) => ({ branchId: rule.branchId ?? "", courseKey: rule.courseKey, minScorePercent: String(rule.minScorePercent) })));
-    const [busy, setBusy] = useState(false);
-    const [message, setMessage] = useState<{ kind: "error" | "success"; text: string } | null>(null);
+    const [saved, setSaved] = useState(false);
+    const action = useAction();
     const branchName = (id: string | null) => (id ? (me.branches.find((branch) => branch.id === id)?.name ?? id) : t("common.allBranches"));
     const knownKeys = new Set(catalog.data?.courses.map((course) => course.key) ?? []);
 
     if (!initial.canEdit) {
         return (
-            <Card>
-                <CardContent className="grid gap-2 text-sm">
-                    <p className="text-muted-foreground">{t("training.rulesHint")}</p>
-                    {initial.rules.length === 0 ? (
-                        <p>{t("training.rulesEmpty")}</p>
-                    ) : (
-                        <ul className="grid gap-1">
-                            {initial.rules.map((rule, index) => (
-                                <li key={index} className="break-anywhere">
-                                    {branchName(rule.branchId)} · {t("role.employee")} · {rule.courseTitle ?? `${rule.courseKey} (${t("training.courseNotUploaded")})`} · {t("training.minScore", { percent: rule.minScorePercent })}
-                                </li>
-                            ))}
-                        </ul>
-                    )}
-                </CardContent>
+            <Card className="max-w-5xl p-5">
+                <p className="mb-3 text-sm text-muted-foreground">{t("training.rulesHint")}</p>
+                {initial.rules.length === 0 ? (
+                    <p className="text-sm">{t("training.rulesEmpty")}</p>
+                ) : (
+                    <ul className="grid gap-1.5 text-sm">
+                        {initial.rules.map((rule, index) => (
+                            <li key={index} className="break-anywhere">
+                                <span className="font-semibold">{branchName(rule.branchId)}</span> · {t("role.employee")} · {rule.courseTitle ?? `${rule.courseKey} (${t("training.courseNotUploaded")})`} · {t("training.minScore", { percent: rule.minScorePercent })}
+                            </li>
+                        ))}
+                    </ul>
+                )}
             </Card>
         );
     }
 
-    async function save() {
-        setBusy(true);
-        setMessage(null);
-        try {
-            await api("/api/training/admission-rules", {
-                method: "PUT",
-                body: { rules: rows.map((row) => ({ branchId: row.branchId || null, courseKey: row.courseKey.trim().toLowerCase(), minScorePercent: Number(row.minScorePercent) })) },
-            });
-            setMessage({ kind: "success", text: t("training.rulesSaved") });
-            onSaved();
-        } catch (caught) {
-            setMessage({ kind: "error", text: errorMessage(caught) });
-        } finally {
-            setBusy(false);
-        }
-    }
-
-    const update = (index: number, patch: Partial<(typeof rows)[number]>) => setRows((current) => current.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+    const update = (index: number, patch: Partial<(typeof rows)[number]>) => {
+        setSaved(false);
+        setRows((current) => current.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+    };
 
     return (
-        <Card>
-            <CardContent>
-                <Form onSubmit={save} busy={busy} canSubmit={rows.every((row) => row.courseKey.trim() !== "" && row.minScorePercent !== "")}>
-                    <p className="text-sm text-muted-foreground">{t("training.rulesHint")}</p>
-                    {initial.source === "config" ? <FormMessage kind="info">{t("training.rulesSourceConfig")}</FormMessage> : null}
-                    {message ? <FormMessage kind={message.kind}>{message.text}</FormMessage> : null}
-                    {rows.length === 0 ? <p className="text-sm">{t("training.rulesEmpty")}</p> : null}
-                    <datalist id="course-keys">
-                        {catalog.data?.courses.map((course) => (
-                            <option key={course.key} value={course.key}>
-                                {course.title}
-                            </option>
-                        ))}
-                    </datalist>
-                    {rows.map((row, index) => (
-                        <fieldset key={index} className="grid gap-2 rounded-md border border-border p-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.3fr)_6rem_auto] sm:items-end">
-                            <legend className="sr-only">{`${t("training.rules")} ${index + 1}`}</legend>
-                            <Field label={t("training.ruleRole")}>
-                                <Select value="employee" disabled>
-                                    <option value="employee">{t("role.employee")}</option>
-                                </Select>
-                            </Field>
-                            <Field label={t("common.branch")}>
-                                <Select value={row.branchId} onChange={(event) => update(index, { branchId: event.target.value })}>
-                                    <option value="">{t("common.allBranches")}</option>
-                                    {me.branches.map((branch) => (
-                                        <option key={branch.id} value={branch.id}>
-                                            {branch.name}
-                                        </option>
-                                    ))}
-                                </Select>
-                            </Field>
-                            <Field label={t("training.ruleCourse")} hint={row.courseKey && catalog.data && !knownKeys.has(row.courseKey.trim().toLowerCase()) ? t("training.courseNotUploaded") : undefined}>
-                                <Input list="course-keys" value={row.courseKey} spellCheck={false} autoCapitalize="none" onChange={(event) => update(index, { courseKey: event.target.value })} />
-                            </Field>
-                            <Field label={t("training.ruleMin")}>
-                                <Input type="number" inputMode="numeric" min={1} max={100} value={row.minScorePercent} onChange={(event) => update(index, { minScorePercent: event.target.value })} />
-                            </Field>
-                            <Button variant="danger-ghost" onClick={() => setRows((current) => current.filter((_, i) => i !== index))}>
-                                {t("training.remove")}
-                            </Button>
-                        </fieldset>
+        <Card className="max-w-5xl p-5">
+            <Form
+                busy={action.busy}
+                canSubmit={rows.every((row) => row.courseKey.trim() !== "" && row.minScorePercent !== "")}
+                onSubmit={async () => {
+                    setSaved(false);
+                    const ok = await action.run(async () =>
+                        api("/api/training/admission-rules", {
+                            method: "PUT",
+                            body: { rules: rows.map((row) => ({ branchId: row.branchId || null, courseKey: row.courseKey.trim().toLowerCase(), minScorePercent: Number(row.minScorePercent) })) },
+                        })
+                    );
+                    if (ok) {
+                        setSaved(true);
+                        onSaved();
+                    }
+                }}
+            >
+                <p className="text-sm text-muted-foreground">{t("training.rulesHint")}</p>
+                {initial.source === "config" ? <FormMessage kind="info">{t("training.rulesSourceConfig")}</FormMessage> : null}
+                {action.error ? <FormMessage kind="error">{action.error}</FormMessage> : null}
+                {saved ? <FormMessage kind="success">{t("training.rulesSaved")}</FormMessage> : null}
+                {rows.length === 0 ? <p className="text-sm">{t("training.rulesEmpty")}</p> : null}
+                <datalist id="course-keys">
+                    {catalog.data?.courses.map((course) => (
+                        <option key={course.key} value={course.key}>
+                            {course.title}
+                        </option>
                     ))}
-                    <div>
-                        <Button variant="secondary" onClick={() => setRows((current) => [...current, { branchId: "", courseKey: "", minScorePercent: "80" }])}>
-                            {t("training.addRule")}
+                </datalist>
+                {rows.map((row, index) => (
+                    <fieldset key={index} className="grid gap-3 rounded-lg border border-border p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_7rem_auto] sm:items-end">
+                        <legend className="sr-only">{`${t("training.rules")} ${index + 1}`}</legend>
+                        <Field label={t("common.branch")}>
+                            <Select value={row.branchId} onChange={(event) => update(index, { branchId: event.target.value })}>
+                                <option value="">{t("common.allBranches")}</option>
+                                {me.branches.map((branch) => (
+                                    <option key={branch.id} value={branch.id}>
+                                        {branch.name}
+                                    </option>
+                                ))}
+                            </Select>
+                        </Field>
+                        <Field label={t("training.ruleCourse")} hint={row.courseKey && catalog.data && !knownKeys.has(row.courseKey.trim().toLowerCase()) ? t("training.courseNotUploaded") : undefined}>
+                            <Input list="course-keys" value={row.courseKey} spellCheck={false} autoCapitalize="none" onChange={(event) => update(index, { courseKey: event.target.value })} />
+                        </Field>
+                        <Field label={t("training.ruleMin")}>
+                            <Input type="number" inputMode="numeric" min={1} max={100} value={row.minScorePercent} onChange={(event) => update(index, { minScorePercent: event.target.value })} />
+                        </Field>
+                        <Button variant="danger" onClick={() => setRows((current) => current.filter((_, i) => i !== index))}>
+                            {t("training.remove")}
                         </Button>
-                    </div>
-                </Form>
-            </CardContent>
+                    </fieldset>
+                ))}
+                <div>
+                    <Button variant="secondary" onClick={() => setRows((current) => [...current, { branchId: "", courseKey: "", minScorePercent: "80" }])}>
+                        {t("training.addRule")}
+                    </Button>
+                </div>
+            </Form>
         </Card>
     );
 }

@@ -7,7 +7,7 @@ import type { Ctx } from "../context.ts";
 import { DUMMY_PASSWORD_HASH, hashPassword, sha256Hex, timingSafeEqual, verifyPassword } from "../crypto.ts";
 import { AppError, badRequest, clientIp, readJson, str } from "../http.ts";
 import { clearRateLimit, enforceRateLimit } from "../rate-limit.ts";
-import { normalizeLogin, readNewPassword } from "../validation.ts";
+import { normalizeLogin, readDisplayName, readNewPassword } from "../validation.ts";
 
 const LOGIN_WINDOW_MS = 15 * 60_000;
 const RESET_MAX_ATTEMPTS = 5;
@@ -91,6 +91,16 @@ export async function me(ctx: Ctx) {
         canSelectAllBranches: actor.role === "director",
         sections: sectionMap(actor),
     };
+}
+
+/** Своё имя меняет сам пользователь (профиль → «Личные данные») */
+export async function updateMe(ctx: Ctx) {
+    const actor = await requireActor(ctx);
+    const body = await readJson(ctx.request);
+    const displayName = readDisplayName(body);
+    await ctx.db.update(users).set({ displayName, updatedAt: ctx.now }).where(eq(users.id, actor.userId));
+    await audit(ctx.db, { companyId: actor.companyId, actorUserId: actor.userId, action: "profile.update", entityType: "user", entityId: actor.userId, data: { displayName } }, ctx.now);
+    return { ok: true, displayName };
 }
 
 export async function selectBranch(ctx: Ctx) {

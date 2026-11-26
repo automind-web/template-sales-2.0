@@ -33,19 +33,19 @@ export function Field({
           })
         : children;
     return (
-        <div className={cn("grid gap-1", className)}>
+        <div className={cn("grid content-start gap-1.5", className)}>
             <Label htmlFor={id}>
                 {label}
-                {optional ? <span className="ml-1 font-normal text-muted-foreground">({t("common.optional")})</span> : null}
+                {optional ? <span className="font-normal"> ({t("common.optional")})</span> : null}
             </Label>
             {control}
             {hint ? (
-                <p id={hintId} className="text-xs text-muted-foreground">
+                <p id={hintId} className="text-xs font-semibold text-muted-foreground">
                     {hint}
                 </p>
             ) : null}
             {error ? (
-                <p id={errorId} className="text-xs font-medium text-danger" role="alert">
+                <p id={errorId} className="text-xs font-semibold text-danger" role="alert">
                     {error}
                 </p>
             ) : null}
@@ -53,15 +53,20 @@ export function Field({
     );
 }
 
+/** Двухколоночная сетка полей (на телефоне — одна колонка) */
+export function FieldGrid({ children, className }: { children: ReactNode; className?: string }) {
+    return <div className={cn("grid gap-4 sm:grid-cols-2", className)}>{children}</div>;
+}
+
 export function FormMessage({ kind, children }: { kind: "error" | "success" | "info"; children: ReactNode }) {
     return (
         <div
             role={kind === "error" ? "alert" : "status"}
             className={cn(
-                "rounded-md border px-3 py-2 text-sm break-anywhere",
-                kind === "error" && "border-danger/40 bg-danger/10 text-danger",
-                kind === "success" && "border-success/40 bg-success/10 text-success",
-                kind === "info" && "border-border bg-muted text-foreground"
+                "rounded-lg px-3.5 py-2.5 text-sm break-anywhere",
+                kind === "error" && "bg-[#fde7e6] text-danger",
+                kind === "success" && "bg-[#e2f3e9] text-success",
+                kind === "info" && "bg-[#fff6dd] text-[#6b5310]"
             )}
         >
             {children}

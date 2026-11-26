@@ -8,7 +8,7 @@ import { AppError } from "./http.ts";
  * Матрица доступа к разделам. Единственный источник правды и для сервера,
  * и для навигации (клиент получает результат через /api/me).
  */
-export const SECTIONS = ["training", "profile", "crm", "kpi", "stats", "whatsapp", "team", "branches", "settings"] as const;
+export const SECTIONS = ["training", "crm", "kpi", "stats", "whatsapp", "settings", "profile"] as const;
 export type Section = (typeof SECTIONS)[number];
 
 export function canUseSection(actor: Actor, section: Section): boolean {
@@ -22,11 +22,9 @@ export function canUseSection(actor: Actor, section: Section): boolean {
             return actor.admitted;
         case "stats":
         case "whatsapp":
-        case "team":
-            return actor.role === "director" || actor.role === "manager";
-        case "branches":
         case "settings":
-            return actor.role === "director";
+            // Руководитель видит в настройках только участников и приглашения своего филиала.
+            return actor.role === "director" || actor.role === "manager";
     }
 }
 

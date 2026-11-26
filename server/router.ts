@@ -28,6 +28,7 @@ export const routes: Route[] = [
     { method: "POST", pattern: "/api/auth/logout", handler: authApi.logout },
     { method: "POST", pattern: "/api/auth/reset", handler: authApi.resetPassword },
     { method: "GET", pattern: "/api/me", handler: authApi.me },
+    { method: "PATCH", pattern: "/api/me", handler: authApi.updateMe },
     { method: "PUT", pattern: "/api/me/branch", handler: authApi.selectBranch },
     { method: "POST", pattern: "/api/me/password", handler: authApi.changePassword },
     { method: "GET", pattern: "/api/me/sessions", handler: authApi.listSessions },
@@ -45,6 +46,7 @@ export const routes: Route[] = [
     // Компания, филиалы, сотрудники
     { method: "GET", pattern: "/api/company", handler: orgApi.getCompany },
     { method: "PATCH", pattern: "/api/company", handler: orgApi.updateCompany },
+    { method: "GET", pattern: "/api/company/connections", handler: orgApi.connections },
     { method: "GET", pattern: "/api/branches", handler: orgApi.listBranches },
     { method: "POST", pattern: "/api/branches", handler: orgApi.createBranch },
     { method: "PATCH", pattern: "/api/branches/:id", handler: orgApi.updateBranch },

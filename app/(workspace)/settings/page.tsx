@@ -1,64 +1,51 @@
 "use client";
 
-import { useState } from "react";
-import { PageHeader, SectionGate } from "../../../components/app-shell.tsx";
+import { Page, SectionGate } from "../../../components/app-shell.tsx";
 import { useSession } from "../../../components/session.tsx";
-import { Card, CardContent } from "../../../components/ui/card.tsx";
-import { Field, FormMessage } from "../../../components/ui/field.tsx";
-import { Form } from "../../../components/ui/form.tsx";
-import { Input } from "../../../components/ui/input.tsx";
+import { BranchesSettings } from "../../../components/settings/branches.tsx";
+import { CompanySettings } from "../../../components/settings/company.tsx";
+import { ConnectionsSettings } from "../../../components/settings/connections.tsx";
+import { InvitationsSettings } from "../../../components/settings/invitations.tsx";
+import { MembersSettings } from "../../../components/settings/members.tsx";
+import { Tabs, useTab, type TabItem } from "../../../components/ui/tabs.tsx";
 import { t } from "../../../i18n/index.ts";
-import { api, ApiError, errorMessage } from "../../../lib/api.ts";
+
+type TabKey = "company" | "branches" | "members" | "invitations" | "connections";
+
+const DIRECTOR_TABS: ReadonlyArray<TabItem<TabKey>> = [
+    { key: "company", label: t("settings.tab.company") },
+    { key: "branches", label: t("settings.tab.branches") },
+    { key: "members", label: t("settings.tab.members") },
+    { key: "invitations", label: t("settings.tab.invitations") },
+    { key: "connections", label: t("settings.tab.connections") },
+];
+
+/** Руководитель филиала управляет только участниками и приглашениями своего филиала */
+const MANAGER_TABS: ReadonlyArray<TabItem<TabKey>> = [
+    { key: "members", label: t("settings.tab.members") },
+    { key: "invitations", label: t("settings.tab.invitations") },
+];
 
 export default function SettingsPage() {
     return (
-        <SectionGate section="settings">
+        <SectionGate section="settings" title={t("settings.title")}>
             <Settings />
         </SectionGate>
     );
 }
 
 function Settings() {
-    const { me, reload } = useSession();
-    const [name, setName] = useState(me.company.name);
-    const [timezone, setTimezone] = useState(me.company.timezone);
-    const [busy, setBusy] = useState(false);
-    const [message, setMessage] = useState<{ kind: "error" | "success"; text: string } | null>(null);
-    const [fields, setFields] = useState<Record<string, string>>({});
-
-    async function submit() {
-        setBusy(true);
-        setMessage(null);
-        setFields({});
-        try {
-            await api("/api/company", { method: "PATCH", body: { name, timezone } });
-            await reload();
-            setMessage({ kind: "success", text: t("settings.saved") });
-        } catch (caught) {
-            setMessage({ kind: "error", text: errorMessage(caught) });
-            if (caught instanceof ApiError) setFields(caught.fields);
-        } finally {
-            setBusy(false);
-        }
-    }
-
-    const changed = name !== me.company.name || timezone !== me.company.timezone;
+    const { me } = useSession();
+    const tabs = me.user.role === "director" ? DIRECTOR_TABS : MANAGER_TABS;
+    const [tab, setTab] = useTab(tabs);
     return (
-        <>
-            <PageHeader title={t("settings.title")} />
-            <Card className="max-w-xl">
-                <CardContent>
-                    <Form onSubmit={submit} busy={busy} canSubmit={changed && name.trim().length >= 2}>
-                        {message ? <FormMessage kind={message.kind}>{message.text}</FormMessage> : null}
-                        <Field label={t("settings.companyName")} error={fields["name"]}>
-                            <Input value={name} maxLength={120} onChange={(event) => setName(event.target.value)} />
-                        </Field>
-                        <Field label={t("settings.timezone")} hint={t("settings.timezoneHint")} error={fields["timezone"]}>
-                            <Input value={timezone} maxLength={64} spellCheck={false} onChange={(event) => setTimezone(event.target.value)} />
-                        </Field>
-                    </Form>
-                </CardContent>
-            </Card>
-        </>
+        <Page title={t("settings.title")}>
+            <Tabs items={tabs} value={tab} onChange={setTab} label={t("settings.title")} />
+            {tab === "company" ? <CompanySettings /> : null}
+            {tab === "branches" ? <BranchesSettings /> : null}
+            {tab === "members" ? <MembersSettings /> : null}
+            {tab === "invitations" ? <InvitationsSettings /> : null}
+            {tab === "connections" ? <ConnectionsSettings /> : null}
+        </Page>
     );
 }

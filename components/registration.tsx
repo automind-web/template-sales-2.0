@@ -1,10 +1,11 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
-import { t, formatDateTime, type MessageKey } from "../i18n/index.ts";
+import { useState } from "react";
+import { formatDateTime, t, type MessageKey } from "../i18n/index.ts";
 import { api, ApiError, errorMessage } from "../lib/api.ts";
-import { AuthLayout } from "./auth-layout.tsx";
+import { useApiData } from "../lib/use-api.ts";
+import { AuthLayout, AuthLink } from "./auth-layout.tsx";
 import { Spinner } from "./ui/card.tsx";
 import { Field, FormMessage } from "./ui/field.tsx";
 import { Form } from "./ui/form.tsx";
@@ -19,53 +20,43 @@ type InvitationInfo = { kind: "activation" | "invite"; role: string; companyName
 export function RegistrationPage({ kind }: { kind: "activation" | "invite" }) {
     const params = useParams<{ token: string }>();
     const token = typeof params?.token === "string" ? params.token : "";
-    const [info, setInfo] = useState<InvitationInfo | null>(null);
-    const [loadError, setLoadError] = useState<string | null>(null);
-    const [form, setForm] = useState({ displayName: "", login: "", password: "", repeat: "" });
-    const [fields, setFields] = useState<Record<string, string>>({});
-    const [error, setError] = useState<string | null>(null);
-    const [busy, setBusy] = useState(false);
-
-    useEffect(() => {
-        if (!token) return;
-        const controller = new AbortController();
-        api<InvitationInfo>(`/api/invitations/by-token/${encodeURIComponent(token)}`, { signal: controller.signal })
-            .then(setInfo)
-            .catch((caught: unknown) => {
-                if (!controller.signal.aborted) setLoadError(errorMessage(caught));
-            });
-        return () => controller.abort();
-    }, [token]);
-
+    const info = useApiData(`invitation-${token}`, (signal) => api<InvitationInfo>(`/api/invitations/by-token/${encodeURIComponent(token)}`, { signal }));
     const title = kind === "activation" ? t("invite.activationTitle") : t("invite.title");
 
-    if (loadError) {
+    if (info.error && !info.data) {
         return (
             <AuthLayout title={title}>
-                <FormMessage kind="error">{loadError}</FormMessage>
-                <p className="mt-4 text-sm">
-                    <a className="text-primary hover:underline" href="/login">
-                        {t("auth.login.title")}
-                    </a>
-                </p>
+                <FormMessage kind="error">{info.error}</FormMessage>
+                <AuthLink href="/login">{t("auth.login.title")}</AuthLink>
             </AuthLayout>
         );
     }
-    if (!info) {
+    if (!info.data) {
         return (
             <AuthLayout title={title}>
                 <Spinner label={t("common.loading")} />
             </AuthLayout>
         );
     }
-
-    const roleLabel = t(`role.${info.role}` as MessageKey);
+    const data = info.data;
     const subtitle = (
         <>
-            <p>{info.branchName ? t("invite.forBranch", { company: info.companyName, branch: info.branchName, role: roleLabel }) : t("invite.for", { company: info.companyName, role: roleLabel })}</p>
-            <p className="mt-1">{t("invite.expiresAt", { date: formatDateTime(info.expiresAt) })}</p>
+            <p>{[data.companyName, data.branchName, t(`role.${data.role}` as MessageKey)].filter(Boolean).join(" · ")}</p>
+            <p className="mt-0.5">{t("invite.expiresAt", { date: formatDateTime(data.expiresAt) })}</p>
         </>
     );
+    return (
+        <AuthLayout title={title} subtitle={subtitle}>
+            <RegistrationForm token={token} />
+        </AuthLayout>
+    );
+}
+
+function RegistrationForm({ token }: { token: string }) {
+    const [form, setForm] = useState({ displayName: "", login: "", password: "", repeat: "" });
+    const [fields, setFields] = useState<Record<string, string>>({});
+    const [error, setError] = useState<string | null>(null);
+    const [busy, setBusy] = useState(false);
 
     function update(key: keyof typeof form, value: string) {
         setForm((current) => ({ ...current, [key]: value }));
@@ -98,23 +89,20 @@ export function RegistrationPage({ kind }: { kind: "activation" | "invite" }) {
     const filled = form.displayName.trim() !== "" && form.login.trim() !== "" && form.password !== "" && form.repeat !== "";
 
     return (
-        <AuthLayout title={title} subtitle={subtitle}>
-            <Form onSubmit={submit} busy={busy} canSubmit={filled} submitLabel={t("invite.submit")}>
-                {error ? <FormMessage kind="error">{error}</FormMessage> : null}
-                <Field label={t("invite.displayName")} error={fields["displayName"]}>
-                    <Input autoComplete="name" value={form.displayName} maxLength={80} onChange={(event) => update("displayName", event.target.value)} autoFocus />
-                </Field>
-                <Field label={t("invite.login")} hint={t("invite.loginHint")} error={fields["login"]}>
-                    <Input autoComplete="username" autoCapitalize="none" spellCheck={false} maxLength={32} value={form.login} onChange={(event) => update("login", event.target.value)} />
-                </Field>
-                <Field label={t("invite.password")} hint={t("invite.passwordHint")} error={fields["password"]}>
-                    <Input type="password" autoComplete="new-password" value={form.password} onChange={(event) => update("password", event.target.value)} />
-                </Field>
-                <Field label={t("invite.passwordRepeat")} error={fields["repeat"]}>
-                    <Input type="password" autoComplete="new-password" value={form.repeat} onChange={(event) => update("repeat", event.target.value)} />
-                </Field>
-            </Form>
-        </AuthLayout>
+        <Form variant="auth" onSubmit={submit} busy={busy} canSubmit={filled} submitLabel={t("invite.submit")}>
+            {error ? <FormMessage kind="error">{error}</FormMessage> : null}
+            <Field label={t("invite.displayName")} error={fields["displayName"]}>
+                <Input autoComplete="name" value={form.displayName} maxLength={80} onChange={(event) => update("displayName", event.target.value)} autoFocus />
+            </Field>
+            <Field label={t("invite.login")} hint={t("invite.loginHint")} error={fields["login"]}>
+                <Input autoComplete="username" autoCapitalize="none" spellCheck={false} maxLength={32} value={form.login} onChange={(event) => update("login", event.target.value)} />
+            </Field>
+            <Field label={t("invite.password")} hint={t("invite.passwordHint")} error={fields["password"]}>
+                <Input type="password" autoComplete="new-password" value={form.password} onChange={(event) => update("password", event.target.value)} />
+            </Field>
+            <Field label={t("invite.passwordRepeat")} error={fields["repeat"]}>
+                <Input type="password" autoComplete="new-password" value={form.repeat} onChange={(event) => update("repeat", event.target.value)} />
+            </Field>
+        </Form>
     );
 }
-

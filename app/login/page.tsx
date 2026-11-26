@@ -1,8 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useState } from "react";
-import { AuthLayout } from "../../components/auth-layout.tsx";
+import { AuthLayout, AuthLink } from "../../components/auth-layout.tsx";
 import { Field, FormMessage } from "../../components/ui/field.tsx";
 import { Form } from "../../components/ui/form.tsx";
 import { Input } from "../../components/ui/input.tsx";
@@ -32,21 +31,17 @@ export default function LoginPage() {
     }
 
     return (
-        <AuthLayout title={t("auth.login.title")} subtitle={t("auth.login.subtitle")}>
-            <Form onSubmit={submit} busy={busy} canSubmit={login.trim() !== "" && password !== ""} submitLabel={t("auth.login.submit")}>
+        <AuthLayout title={t("auth.login.title")}>
+            <Form variant="auth" onSubmit={submit} busy={busy} canSubmit={login.trim() !== "" && password !== ""} submitLabel={t("auth.login.submit")}>
                 {error ? <FormMessage kind="error">{error}</FormMessage> : null}
                 <Field label={t("common.login")} error={fields["login"]}>
-                    <Input autoComplete="username" autoCapitalize="none" spellCheck={false} value={login} onChange={(event) => setLogin(event.target.value)} data-autofocus autoFocus />
+                    <Input autoComplete="username" autoCapitalize="none" spellCheck={false} value={login} onChange={(event) => setLogin(event.target.value)} autoFocus />
                 </Field>
                 <Field label={t("common.password")} error={fields["password"]}>
                     <Input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} />
                 </Field>
             </Form>
-            <p className="mt-4 text-sm">
-                <Link className="text-primary underline-offset-4 hover:underline" href="/reset">
-                    {t("auth.login.forgot")}
-                </Link>
-            </p>
+            <AuthLink href="/reset">{t("auth.login.forgot")}</AuthLink>
         </AuthLayout>
     );
 }

@@ -3,12 +3,12 @@
 import Link from "next/link";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { SectionGate } from "../../../../../components/app-shell.tsx";
+import { Page, SectionGate } from "../../../../../components/app-shell.tsx";
 import { useSession } from "../../../../../components/session.tsx";
 import { AdmissionRulesStatus } from "../../../../../components/training/my-courses.tsx";
 import type { AttemptView, RuleStatus } from "../../../../../components/training/types.ts";
 import { Button, buttonVariants } from "../../../../../components/ui/button.tsx";
-import { Card, CardContent, CardHeader, CardTitle, Spinner } from "../../../../../components/ui/card.tsx";
+import { Card, Spinner } from "../../../../../components/ui/card.tsx";
 import { Dialog } from "../../../../../components/ui/dialog.tsx";
 import { ErrorRetry } from "../../../../../components/ui/error-retry.tsx";
 import { FormMessage } from "../../../../../components/ui/field.tsx";
@@ -16,13 +16,14 @@ import { Form } from "../../../../../components/ui/form.tsx";
 import { t } from "../../../../../i18n/index.ts";
 import { api, errorMessage } from "../../../../../lib/api.ts";
 import { useApiData } from "../../../../../lib/use-api.ts";
+import { cn } from "../../../../../lib/utils.ts";
 
 type AttemptResponse = { attempt: AttemptView };
 type SubmitResponse = AttemptResponse & { admission: { admitted: boolean; granted: boolean; rules: RuleStatus[] } };
 
 export default function TestPage() {
     return (
-        <SectionGate section="training">
+        <SectionGate section="training" title={t("training.title")}>
             <TestScreen />
         </SectionGate>
     );
@@ -50,8 +51,13 @@ function TestScreen() {
         if (!attemptId && data.data) router.replace(`${pathname}?attempt=${data.data.attempt.id}`, { scroll: false });
     }, [attemptId, data.data, pathname, router]);
 
-    if (data.error && !data.data) return <ErrorRetry message={data.error} onRetry={data.reload} />;
-    if (!data.data) return <Spinner label={t("common.loading")} />;
+    if (!data.data) {
+        return (
+            <Page title={t("training.title")}>
+                {data.error ? <ErrorRetry message={data.error} onRetry={data.reload} /> : <Spinner label={t("common.loading")} />}
+            </Page>
+        );
+    }
     return <AttemptForm key={data.data.attempt.id} courseId={courseId} initial={data.data.attempt} />;
 }
 
@@ -66,7 +72,7 @@ function AttemptForm({ courseId, initial }: { courseId: string; initial: Attempt
     const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const latestAnswers = useRef(answers);
 
-    const unanswered = attempt.questions.filter((question) => !(answers[question.key]?.length)).length;
+    const unanswered = attempt.questions.filter((question) => !answers[question.key]?.length).length;
 
     function choose(questionKey: string, optionKey: string, kind: "single" | "multiple", checked: boolean) {
         setAnswers((current) => {
@@ -109,7 +115,7 @@ function AttemptForm({ courseId, initial }: { courseId: string; initial: Attempt
     }
 
     const back = (
-        <Link href={`/training/${courseId}`} className="text-sm text-primary hover:underline">
+        <Link href={`/training/${courseId}`} className="text-sm font-medium text-primary hover:underline">
             ← {t("training.backToCourse")}
         </Link>
     );
@@ -117,17 +123,15 @@ function AttemptForm({ courseId, initial }: { courseId: string; initial: Attempt
     if (attempt.status === "submitted" && attempt.result) {
         const result = attempt.result;
         return (
-            <div className="grid max-w-2xl gap-3">
-                {back}
-                <Card>
-                    <CardHeader>
-                        <CardTitle>{t("training.resultTitle")}</CardTitle>
-                        <span className="text-xs text-muted-foreground">
-                            {attempt.title} · {t("training.version", { version: attempt.version })}
-                        </span>
-                    </CardHeader>
-                    <CardContent className="grid gap-3">
-                        <p className="text-lg font-semibold" role="status">
+            <Page title={attempt.title}>
+                <div className="grid max-w-3xl gap-4">
+                    {back}
+                    <Card className="grid gap-4 p-5">
+                        <div>
+                            <h2 className="text-[17px] font-bold">{t("training.resultTitle")}</h2>
+                            <p className="text-[13px] text-muted-foreground">{t("training.version", { version: attempt.version })}</p>
+                        </div>
+                        <p className="text-2xl font-bold" role="status">
                             {t("training.result", { correct: result.correct, total: result.total, percent: result.percent })}
                         </p>
                         <FormMessage kind={result.passed ? "success" : "error"}>
@@ -153,65 +157,66 @@ function AttemptForm({ courseId, initial }: { courseId: string; initial: Attempt
                                 {t("training.backToList")}
                             </Link>
                         </div>
-                    </CardContent>
-                </Card>
-            </div>
+                    </Card>
+                </div>
+            </Page>
         );
     }
 
     return (
-        <div className="grid max-w-2xl gap-3">
-            {back}
-            <h1 className="text-xl font-semibold break-anywhere">{attempt.title}</h1>
-            <p className="text-sm text-muted-foreground">
-                {t("training.version", { version: attempt.version })} · {t("training.autosaved")}
-            </p>
-            {attempt.latestVersion > attempt.version ? <FormMessage kind="info">{t("training.attemptVersionNotice", { version: attempt.version, latest: attempt.latestVersion })}</FormMessage> : null}
-            <Form
-                onSubmit={() => (unanswered > 0 ? setConfirm(true) : submit())}
-                busy={busy}
-                submitLabel={t("training.submit")}
-                secondary={
-                    <span className="text-sm text-muted-foreground" aria-live="polite">
-                        {t("training.answered", { count: attempt.questions.length - unanswered, total: attempt.questions.length })}
-                    </span>
-                }
-            >
-                {error ? <FormMessage kind="error">{error}</FormMessage> : null}
-                {attempt.questions.map((question, index) => (
-                    <fieldset key={question.key} className="grid gap-2 rounded-lg border border-border bg-surface p-3">
-                        <legend className="float-left w-full font-medium break-anywhere">
-                            {index + 1}. {question.text}
-                        </legend>
-                        <p className="text-xs text-muted-foreground">{question.kind === "single" ? t("training.single") : t("training.multiple")}</p>
-                        {question.options.map((option) => {
-                            const checked = (answers[question.key] ?? []).includes(option.key);
-                            return (
-                                <label key={option.key} className="flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted has-[:checked]:bg-selected has-[:checked]:text-selected-foreground">
-                                    <input
-                                        type={question.kind === "single" ? "radio" : "checkbox"}
-                                        name={`q-${question.key}`}
-                                        className="mt-0.5 size-4 shrink-0 accent-[var(--brand-primary)]"
-                                        checked={checked}
-                                        onChange={(event) => choose(question.key, option.key, question.kind, event.target.checked)}
-                                    />
-                                    <span className="break-anywhere">{option.text}</span>
-                                </label>
-                            );
-                        })}
-                    </fieldset>
-                ))}
-            </Form>
+        <Page title={attempt.title}>
+            <div className="grid max-w-3xl gap-4">
+                {back}
+                <p className="text-[13px] text-muted-foreground">
+                    {t("training.version", { version: attempt.version })} · {t("training.autosaved")}
+                </p>
+                {attempt.latestVersion > attempt.version ? <FormMessage kind="info">{t("training.attemptVersionNotice", { version: attempt.version, latest: attempt.latestVersion })}</FormMessage> : null}
+                <Form
+                    onSubmit={() => (unanswered > 0 ? setConfirm(true) : submit())}
+                    busy={busy}
+                    submitLabel={t("training.submit")}
+                    secondary={
+                        <span className="text-sm text-muted-foreground" aria-live="polite">
+                            {t("training.answered", { count: attempt.questions.length - unanswered, total: attempt.questions.length })}
+                        </span>
+                    }
+                >
+                    {error ? <FormMessage kind="error">{error}</FormMessage> : null}
+                    {attempt.questions.map((question, index) => (
+                        <fieldset key={question.key} className="grid gap-1 rounded-xl border border-border bg-surface p-5">
+                            <legend className="float-left mb-1 w-full font-bold break-anywhere">
+                                {index + 1}. {question.text}
+                            </legend>
+                            <p className="mb-1 text-[13px] text-muted-foreground">{question.kind === "single" ? t("training.single") : t("training.multiple")}</p>
+                            {question.options.map((option) => {
+                                const checked = (answers[question.key] ?? []).includes(option.key);
+                                return (
+                                    <label key={option.key} className={cn("flex cursor-pointer items-start gap-3 rounded-lg px-3 py-2 text-sm hover:bg-muted", checked && "bg-selected text-selected-foreground hover:bg-selected")}>
+                                        <input
+                                            type={question.kind === "single" ? "radio" : "checkbox"}
+                                            name={`q-${question.key}`}
+                                            className="mt-0.5 size-[18px] shrink-0 accent-[var(--brand-primary)]"
+                                            checked={checked}
+                                            onChange={(event) => choose(question.key, option.key, question.kind, event.target.checked)}
+                                        />
+                                        <span className="break-anywhere">{option.text}</span>
+                                    </label>
+                                );
+                            })}
+                        </fieldset>
+                    ))}
+                </Form>
+            </div>
             <Dialog open={confirm} onClose={() => setConfirm(false)} title={t("training.submit")} description={t("training.submitConfirm", { count: unanswered })}>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap justify-end gap-2">
+                    <Button variant="secondary" onClick={() => setConfirm(false)}>
+                        {t("common.cancel")}
+                    </Button>
                     <Button onClick={() => void submit()} data-autofocus>
                         {t("training.submit")}
                     </Button>
-                    <Button variant="ghost" onClick={() => setConfirm(false)}>
-                        {t("common.cancel")}
-                    </Button>
                 </div>
             </Dialog>
-        </div>
+        </Page>
     );
 }
