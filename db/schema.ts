@@ -331,3 +331,29 @@ export const leadOperations = sqliteTable("lead_operations", {
     userId: text("user_id"),
     createdAt: integer("created_at").notNull(),
 });
+
+// ---------------------------------------------------------------------------
+// Этап 5. KPI
+// ---------------------------------------------------------------------------
+
+/**
+ * Версия методики KPI: набор показателей с формулами из полей CRM.
+ * scope — 'company' или id филиала (методика филиала заменяет общую).
+ * Утверждённая версия действует с момента утверждения: прошлые периоды
+ * считаются по версии, утверждённой до их окончания, и не переписываются.
+ */
+export const kpiVersions = sqliteTable("kpi_versions", {
+    id: text("id").primaryKey(),
+    companyId: text("company_id").notNull().references(() => companies.id),
+    scope: text("scope").notNull(),
+    version: integer("version").notNull(),
+    status: text("status", { enum: ["draft", "approved"] }).notNull(),
+    indicators: text("indicators").notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: integer("created_at").notNull(),
+    approvedBy: text("approved_by"),
+    approvedAt: integer("approved_at"),
+}, (t) => [
+    uniqueIndex("kpi_versions_scope_version_unique").on(t.companyId, t.scope, t.version),
+    index("kpi_versions_approved_idx").on(t.companyId, t.scope, t.approvedAt),
+]);

@@ -2,6 +2,7 @@ import type { Ctx } from "./context.ts";
 import { createDb } from "./db.ts";
 import { AppError, errorResponse, json, parseCookies } from "./http.ts";
 import type { Env } from "./runtime.ts";
+import * as analyticsApi from "./handlers/analytics.ts";
 import * as authApi from "./handlers/auth.ts";
 import * as crmApi from "./handlers/crm.ts";
 import * as invitationsApi from "./handlers/invitations.ts";
@@ -82,6 +83,14 @@ export const routes: Route[] = [
     { method: "PATCH", pattern: "/api/crm/leads/:id", handler: crmApi.crmUpdate },
     { method: "GET", pattern: "/api/settings/process", handler: crmApi.getProcess },
     { method: "PUT", pattern: "/api/settings/process", handler: crmApi.saveProcess },
+
+    // KPI и статистика (одна функция расчёта)
+    { method: "GET", pattern: "/api/stats", handler: analyticsApi.stats },
+    { method: "GET", pattern: "/api/stats/leads", handler: analyticsApi.statsLeads },
+    { method: "GET", pattern: "/api/kpi/methodology", handler: analyticsApi.methodology },
+    { method: "POST", pattern: "/api/kpi/methodology", handler: analyticsApi.saveMethodology },
+    { method: "POST", pattern: "/api/kpi/methodology/:id/approve", handler: analyticsApi.approveMethodology },
+    { method: "GET", pattern: "/api/kpi/report", handler: analyticsApi.kpiReport },
 
     // Интерфейс интеграции (Authorization: Bearer INTEGRATION_TOKEN)
     { method: "GET", pattern: "/api/integration/training/courses", handler: integrationApi.listIntegrationCourses, external: true },
