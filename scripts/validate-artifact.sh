@@ -13,6 +13,9 @@ migration_root="${SITES_PROJECT_ROOT}/dist/.openai/drizzle"
 required_migrations=(
   "0000_init.sql"
   "0001_training.sql"
+  "0002_crm.sql"
+  "0003_kpi.sql"
+  "0004_whatsapp.sql"
   "meta/_journal.json"
 )
 

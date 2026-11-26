@@ -113,7 +113,7 @@ await emp.p.screenshot({ path: SHOTS + "/s2-result-mobile.png" });
 log("ok: тест сдан по редакции 1, допуск выдан");
 await emp.p.getByRole("link", { name: "CRM" }).first().click();
 await emp.p.waitForURL("**/crm");
-await emp.p.getByText("Раздел появится на следующем этапе").waitFor();
+await emp.p.getByText("Лидов пока нет").waitFor();
 log("ok: CRM открыт после допуска");
 const overflow = await emp.p.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
 assert(!overflow, "нет горизонтальной прокрутки на телефоне");

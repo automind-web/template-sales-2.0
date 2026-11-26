@@ -131,7 +131,7 @@ await mgr.p.waitForTimeout(500);
 await mgr.p.reload();
 assert(await mgr.p.locator("tr", { hasText: "Константин" }).getByLabel("допущен").isChecked(), "допуск выдан и сохранён");
 await emp.p.goto(BASE + "/crm");
-await emp.p.getByText("Раздел в разработке").waitFor();
+await emp.p.getByText("Лидов пока нет").waitFor();
 log("ok: после допуска CRM открыт со следующего запроса");
 assert(!(await emp.p.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)), "нет горизонтальной прокрутки на телефоне");
 

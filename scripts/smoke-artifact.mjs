@@ -115,6 +115,26 @@ try {
     const anonymousFile = await mf.dispatchFetch(`${base}/api/training/files/${uploadedBody.fileId}`);
     check(anonymousFile.status === 401, `файл без входа → ${anonymousFile.status}`);
 
+    // CRM, статистика и WhatsApp Studio в Workers-рантайме
+    const send = (method, path, body) =>
+        mf.dispatchFetch(`${base}${path}`, { method, headers: { "content-type": "application/json", "x-asc-request": "1", cookie }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    const lead = await send("POST", "/api/crm/leads", { opId: "smoke-op-00000001", clientName: "Smoke client", clientPhone: "+77010000000" });
+    const leadBody = await lead.json();
+    check(lead.status === 200 && leadBody.lead?.number === 1, `лид создан (D1 batch) → ${lead.status}`);
+    const moved = await send("PATCH", `/api/crm/leads/${leadBody.lead.id}`, { opId: "smoke-op-00000002", version: 1, changes: { stage: "contact", nextContactAt: Date.now() + 86400000 } });
+    check(moved.status === 200, `смена этапа → ${moved.status}`);
+    const stats = await mf.dispatchFetch(`${base}/api/stats`, { headers: { cookie } });
+    const statsBody = await stats.json();
+    check(stats.status === 200 && statsBody.totals?.values?.leads_created === 1, `статистика считает лид → ${stats.status}`);
+    const agent = await send("POST", "/api/whatsapp/agent", {});
+    check(agent.status === 200, `агент WhatsApp создан → ${agent.status}`);
+    await send("POST", "/api/whatsapp/materials", { title: "Доставка", body: "Доставка по городу занимает 1 день." });
+    const dialog = await send("POST", "/api/whatsapp/test", { question: "Сколько идёт доставка?" });
+    const dialogBody = await dialog.json();
+    check(dialog.status === 200 && dialogBody.mode === "offline" && dialogBody.reply.includes("1 день"), `тестовый диалог без ключа модели отвечает по материалам → ${dialog.status}`);
+    const hook = await mf.dispatchFetch(`${base}/api/whatsapp/webhook/unknown-secret-unknown-secret`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    check(hook.status === 404, `webhook с неизвестным секретом → ${hook.status}`);
+
     const asset = await mf.dispatchFetch(`${base}/favicon.svg`);
     check(asset.status === 200, `статический файл → ${asset.status}`);
 } finally {

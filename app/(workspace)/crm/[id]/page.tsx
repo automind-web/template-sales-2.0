@@ -41,7 +41,8 @@ function LeadScreen() {
     const data = useApiData(`lead-${id}`, (signal) => api<LeadDetail>(`/api/crm/leads/${encodeURIComponent(id)}`, { signal }));
     // Локальная копия после изменений; новые данные с сервера её заменяют.
     const [local, setLocal] = useState<{ base: unknown; detail: LeadDetail } | null>(null);
-    const detail = local && local.base === data.data ? local.detail : data.data;
+    // Запоздавший ответ перезагрузки (запрошен до сохранения) не перекрывает более новую версию лида.
+    const detail = local && (local.base === data.data || local.detail.lead.version > (data.data?.lead.version ?? 0)) ? local.detail : data.data;
 
     if (!detail) {
         return (
