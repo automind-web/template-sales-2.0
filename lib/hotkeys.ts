@@ -6,6 +6,7 @@
  * сенсорных экранах подсказки не показываются — действия доступны касанием)
  * и роль (через поле roles).
  */
+import { useSyncExternalStore } from "react";
 import type { MessageKey } from "../i18n/index.ts";
 
 export type HotkeyId = "focusSearch" | "openSelected" | "submitForm" | "closeDialog";
@@ -112,4 +113,11 @@ export function blockedByDialog(target: EventTarget | null): boolean {
     const top = topDialog();
     if (!top) return false;
     return !(target instanceof Node && top.contains(target));
+}
+
+const subscribeNothing = () => () => {};
+
+/** Показывать ли подсказки клавиш: только в браузере и не на сенсорном экране без клавиатуры */
+export function useHotkeyHints(): boolean {
+    return useSyncExternalStore(subscribeNothing, () => !isTouchOnly(), () => false);
 }

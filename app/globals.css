@@ -79,3 +79,19 @@ body {
     scroll-behavior: auto !important;
   }
 }
+
+/* Появление карточки в новой колонке канбана (отключается при prefers-reduced-motion) */
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.card-in {
+  animation: card-in 220ms ease-out;
+}

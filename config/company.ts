@@ -67,6 +67,16 @@ export type AdmissionRule = {
     minScorePercent: number;
 };
 
+export type WhatsappAgentConfig = {
+    /** Имя базового агента, которое копируется в филиал */
+    name: string;
+    /** Базовая инструкция агента */
+    instructions: string;
+    /** Модель по умолчанию и список проверенных моделей */
+    model: string;
+    models: string[];
+};
+
 export type CompanyConfig = {
     name: string;
     shortName: string;
@@ -79,6 +89,11 @@ export type CompanyConfig = {
     palette: Palette;
     funnel: FunnelConfig;
     admissionRules: AdmissionRule[];
+    /** Валюта сумм сделок (подпись) */
+    currency: string;
+    /** Сотрудники видят лиды коллег своего филиала (иначе — только свои) */
+    employeesSeeBranchLeads: boolean;
+    whatsappAgent: WhatsappAgentConfig;
     /** Срок действия ссылки активации директора, часов */
     activationLinkTtlHours: number;
     /** Срок действия приглашения сотрудника, часов */
@@ -139,6 +154,15 @@ export const companyConfig: CompanyConfig = {
     admissionRules: [
         { role: "employee", branchId: null, testKey: "sales-basics", minScorePercent: 80 },
     ],
+    currency: "₸",
+    employeesSeeBranchLeads: false,
+    whatsappAgent: {
+        name: "Помощник",
+        instructions:
+            "Ты — вежливый консультант компании в WhatsApp. Отвечай коротко и по делу, на языке клиента. Отвечай только по разрешённым материалам. Если ответа в материалах нет — скажи, что передашь вопрос менеджеру, и попроси удобное время для звонка. Не обещай скидок и сроков, которых нет в материалах.",
+        model: "gpt-4.1-mini",
+        models: ["gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini", "gpt-4o"],
+    },
     activationLinkTtlHours: 72,
     invitationTtlHours: 72,
     resetCodeTtlHours: 24,

@@ -15,6 +15,13 @@
       "when": 1795582832128,
       "tag": "0001_training",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1795696308498,
+      "tag": "0002_crm",
+      "breakpoints": true
     }
   ]
 }

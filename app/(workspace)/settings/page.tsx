@@ -7,13 +7,15 @@ import { CompanySettings } from "../../../components/settings/company.tsx";
 import { ConnectionsSettings } from "../../../components/settings/connections.tsx";
 import { InvitationsSettings } from "../../../components/settings/invitations.tsx";
 import { MembersSettings } from "../../../components/settings/members.tsx";
+import { ProcessSettings } from "../../../components/settings/process.tsx";
 import { Tabs, useTab, type TabItem } from "../../../components/ui/tabs.tsx";
 import { t } from "../../../i18n/index.ts";
 
-type TabKey = "company" | "branches" | "members" | "invitations" | "connections";
+type TabKey = "company" | "process" | "branches" | "members" | "invitations" | "connections";
 
 const DIRECTOR_TABS: ReadonlyArray<TabItem<TabKey>> = [
     { key: "company", label: t("settings.tab.company") },
+    { key: "process", label: t("settings.tab.process") },
     { key: "branches", label: t("settings.tab.branches") },
     { key: "members", label: t("settings.tab.members") },
     { key: "invitations", label: t("settings.tab.invitations") },
@@ -42,6 +44,7 @@ function Settings() {
         <Page title={t("settings.title")}>
             <Tabs items={tabs} value={tab} onChange={setTab} label={t("settings.title")} />
             {tab === "company" ? <CompanySettings /> : null}
+            {tab === "process" ? <ProcessSettings /> : null}
             {tab === "branches" ? <BranchesSettings /> : null}
             {tab === "members" ? <MembersSettings /> : null}
             {tab === "invitations" ? <InvitationsSettings /> : null}

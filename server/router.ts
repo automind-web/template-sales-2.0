@@ -3,6 +3,7 @@ import { createDb } from "./db.ts";
 import { AppError, errorResponse, json, parseCookies } from "./http.ts";
 import type { Env } from "./runtime.ts";
 import * as authApi from "./handlers/auth.ts";
+import * as crmApi from "./handlers/crm.ts";
 import * as invitationsApi from "./handlers/invitations.ts";
 import * as integrationApi from "./handlers/integration.ts";
 import * as orgApi from "./handlers/organization.ts";
@@ -71,6 +72,16 @@ export const routes: Route[] = [
     { method: "DELETE", pattern: "/api/training/assignments/:id", handler: trainingApi.removeAssignment },
     { method: "GET", pattern: "/api/training/admission-rules", handler: trainingApi.getAdmissionRules },
     { method: "PUT", pattern: "/api/training/admission-rules", handler: trainingApi.saveAdmissionRules },
+
+    // CRM
+    { method: "GET", pattern: "/api/crm/config", handler: crmApi.crmConfig },
+    { method: "GET", pattern: "/api/crm/leads", handler: crmApi.crmList },
+    { method: "POST", pattern: "/api/crm/leads", handler: crmApi.crmCreate },
+    { method: "GET", pattern: "/api/crm/export", handler: crmApi.crmExport },
+    { method: "GET", pattern: "/api/crm/leads/:id", handler: crmApi.crmGet },
+    { method: "PATCH", pattern: "/api/crm/leads/:id", handler: crmApi.crmUpdate },
+    { method: "GET", pattern: "/api/settings/process", handler: crmApi.getProcess },
+    { method: "PUT", pattern: "/api/settings/process", handler: crmApi.saveProcess },
 
     // Интерфейс интеграции (Authorization: Bearer INTEGRATION_TOKEN)
     { method: "GET", pattern: "/api/integration/training/courses", handler: integrationApi.listIntegrationCourses, external: true },

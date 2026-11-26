@@ -262,3 +262,72 @@ export const admissionRules = sqliteTable("admission_rules", {
     createdAt: integer("created_at").notNull(),
     removedAt: integer("removed_at"),
 }, (t) => [index("admission_rules_company_idx").on(t.companyId)]);
+
+// ---------------------------------------------------------------------------
+// Этап 3–4. CRM
+// ---------------------------------------------------------------------------
+
+/**
+ * Лид (сделка) воронки филиала. Запись защищена номером версии: изменение
+ * принимается, только если клиент прислал текущую версию. last_op_id — последняя
+ * применённая операция (повтор той же операции второго события не создаёт).
+ */
+export const leads = sqliteTable("leads", {
+    id: text("id").primaryKey(),
+    companyId: text("company_id").notNull().references(() => companies.id),
+    branchId: text("branch_id").notNull().references(() => branches.id),
+    /** Сквозной номер лида в компании (#12) */
+    number: integer("number").notNull(),
+    clientName: text("client_name").notNull(),
+    clientPhone: text("client_phone"),
+    clientCompany: text("client_company"),
+    source: text("source", { enum: ["manual", "whatsapp"] }).notNull().default("manual"),
+    stage: text("stage").notNull(),
+    /** Ответственный; null — не назначен (например, лид из WhatsApp) */
+    ownerUserId: text("owner_user_id").references(() => users.id),
+    nextContactAt: integer("next_contact_at"),
+    amount: integer("amount"),
+    lostReason: text("lost_reason"),
+    /** Строка поиска в нижнем регистре: номер, клиент, телефон, компания */
+    searchText: text("search_text").notNull(),
+    version: integer("version").notNull().default(1),
+    lastOpId: text("last_op_id"),
+    createdBy: text("created_by"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    stageChangedAt: integer("stage_changed_at").notNull(),
+    /** Момент перехода в конечный этап (сделка или отказ) и ответственный на тот момент */
+    closedAt: integer("closed_at"),
+    closedOwnerUserId: text("closed_owner_user_id"),
+}, (t) => [
+    uniqueIndex("leads_company_number_unique").on(t.companyId, t.number),
+    index("leads_branch_stage_idx").on(t.branchId, t.stage),
+    index("leads_branch_owner_idx").on(t.branchId, t.ownerUserId),
+    index("leads_branch_next_contact_idx").on(t.branchId, t.nextContactAt),
+    index("leads_company_closed_idx").on(t.companyId, t.closedAt),
+    index("leads_company_created_idx").on(t.companyId, t.createdAt),
+    index("leads_branch_phone_idx").on(t.branchId, t.clientPhone),
+]);
+
+/** История лида: кто, когда, что было и что стало */
+export const leadEvents = sqliteTable("lead_events", {
+    id: text("id").primaryKey(),
+    leadId: text("lead_id").notNull().references(() => leads.id),
+    companyId: text("company_id").notNull(),
+    branchId: text("branch_id").notNull(),
+    type: text("type", { enum: ["created", "stage", "owner", "next_contact", "field", "comment"] }).notNull(),
+    field: text("field"),
+    oldValue: text("old_value"),
+    newValue: text("new_value"),
+    actorUserId: text("actor_user_id"),
+    opId: text("op_id"),
+    createdAt: integer("created_at").notNull(),
+}, (t) => [index("lead_events_lead_idx").on(t.leadId, t.createdAt)]);
+
+/** Применённые операции: повтор нажатия или доставки возвращает тот же результат */
+export const leadOperations = sqliteTable("lead_operations", {
+    opId: text("op_id").primaryKey(),
+    leadId: text("lead_id").notNull(),
+    userId: text("user_id"),
+    createdAt: integer("created_at").notNull(),
+});

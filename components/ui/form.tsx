@@ -1,20 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useSyncExternalStore, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, type FormEvent, type ReactNode } from "react";
 import { t } from "../../i18n/index.ts";
-import { blockedByDialog, hotkeyKeys, isTouchOnly, matchHotkey } from "../../lib/hotkeys.ts";
+import { blockedByDialog, hotkeyKeys, matchHotkey, useHotkeyHints } from "../../lib/hotkeys.ts";
 import { cn } from "../../lib/utils.ts";
 import { Kbd } from "./badge.tsx";
 import { Button } from "./button.tsx";
-
-const subscribeNothing = () => () => {};
-const serverValue = () => null;
-let cachedKeys: string | null | undefined;
-/** Подсказка зависит от ОС и типа экрана, поэтому вычисляется только в браузере */
-function clientKeys(): string | null {
-    cachedKeys ??= isTouchOnly() ? null : hotkeyKeys("submitForm");
-    return cachedKeys;
-}
 
 /**
  * Форма с сохранением по Ctrl+Enter / ⌘+Return, когда кнопка доступна.
@@ -43,7 +34,7 @@ export function Form({
     children: ReactNode;
 }) {
     const formRef = useRef<HTMLFormElement>(null);
-    const keys = useSyncExternalStore(subscribeNothing, clientKeys, serverValue);
+    const keys = useHotkeyHints() ? hotkeyKeys("submitForm") : null;
     const enabled = canSubmit && !busy;
     const enabledRef = useRef(enabled);
     const submitRef = useRef(onSubmit);

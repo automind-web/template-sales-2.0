@@ -40,3 +40,21 @@ export function formatDateTime(ms: number | null | undefined, timeZone: string =
     }
     return formatter.format(new Date(ms));
 }
+
+const shortFormatters = new Map<string, Intl.DateTimeFormat>();
+
+/** Коротко, как в списках: «24 нояб., 23:59» */
+export function formatShort(ms: number, timeZone: string = companyConfig.timezone): string {
+    let formatter = shortFormatters.get(timeZone);
+    if (!formatter) {
+        formatter = new Intl.DateTimeFormat("ru-RU", { timeZone, day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+        shortFormatters.set(timeZone, formatter);
+    }
+    return formatter.format(new Date(ms));
+}
+
+/** Сумма с разделителями разрядов и валютой */
+export function formatMoney(value: number | null | undefined): string {
+    if (value === null || value === undefined) return "—";
+    return `${new Intl.NumberFormat("ru-RU").format(value)} ${companyConfig.currency}`;
+}
