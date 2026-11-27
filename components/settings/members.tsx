@@ -156,7 +156,7 @@ export function MembersSettings() {
 }
 
 /** Флажок переключается сразу; после ответа сервера показывает сохранённое состояние */
-function OptimisticCheckbox({ label, checked, onToggle }: { label: string; checked: boolean; onToggle: (next: boolean) => Promise<void> }) {
+export function OptimisticCheckbox({ label, checked, onToggle }: { label: string; checked: boolean; onToggle: (next: boolean) => Promise<void> }) {
     const [pending, setPending] = useState<boolean | null>(null);
     return (
         <Checkbox

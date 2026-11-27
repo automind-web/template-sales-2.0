@@ -3,7 +3,7 @@ import type { HTMLAttributes, ReactNode } from "react";
 import { cn } from "../../lib/utils.ts";
 
 export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
-    return <div className={cn("rounded-xl border border-border bg-surface shadow-[0_1px_2px_rgba(16,24,40,0.04)]", className)} {...props} />;
+    return <div className={cn("rounded-2xl border border-border bg-surface shadow-[0_1px_2px_#1d24330a,0_10px_30px_-20px_#1d243333]", className)} {...props} />;
 }
 
 /** Карточка-раздел: заголовок, необязательное действие справа, содержимое */
@@ -44,7 +44,7 @@ export function EmptyState({ icon: Icon, title, children }: { icon?: LucideIcon;
     return (
         <div className="flex flex-col items-center gap-2 px-4 py-12 text-center">
             {Icon ? (
-                <span aria-hidden className="mb-1 inline-flex size-11 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+                <span aria-hidden className="mb-1 inline-flex size-12 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/15 to-primary/5 text-primary">
                     <Icon className="size-5" />
                 </span>
             ) : null}

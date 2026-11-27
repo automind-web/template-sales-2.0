@@ -126,14 +126,18 @@ try {
     const stats = await mf.dispatchFetch(`${base}/api/stats`, { headers: { cookie } });
     const statsBody = await stats.json();
     check(stats.status === 200 && statsBody.totals?.values?.leads_created === 1, `статистика считает лид → ${stats.status}`);
-    const agent = await send("POST", "/api/whatsapp/agent", {});
-    check(agent.status === 200, `агент WhatsApp создан → ${agent.status}`);
-    await send("POST", "/api/whatsapp/materials", { title: "Доставка", body: "Доставка по городу занимает 1 день." });
-    const dialog = await send("POST", "/api/whatsapp/test", { question: "Сколько идёт доставка?" });
-    const dialogBody = await dialog.json();
-    check(dialog.status === 200 && dialogBody.mode === "offline" && dialogBody.reply.includes("1 день"), `тестовый диалог без ключа модели отвечает по материалам → ${dialog.status}`);
-    const hook = await mf.dispatchFetch(`${base}/api/whatsapp/webhook/unknown-secret-unknown-secret`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
-    check(hook.status === 404, `webhook с неизвестным секретом → ${hook.status}`);
+    // WhatsApp Studio: агент, ключ шифруется ключом сайта (AES-GCM в Workers), база знаний, адрес приёма сообщений
+    const agent = await send("POST", "/api/wa/agents", { name: "Консультант" });
+    const agentBody = await agent.json();
+    check(agent.status === 201 && agentBody.agent?.prompt?.includes("«Smoke»"), `агент WhatsApp создан со стартовой инструкцией → ${agent.status}`);
+    const key = await send("POST", `/api/wa/agents/${agentBody.agent.id}/credentials`, { provider: "openai", token: "sk-smoke-test-key-123456" });
+    const keyText = await key.text();
+    check(key.status === 200 && !keyText.includes("sk-smoke-test-key"), `ключ сохранён и не возвращается в браузер → ${key.status}`);
+    const docs = await send("POST", `/api/wa/agents/${agentBody.agent.id}/documents/files`, { files: [{ name: "Доставка.txt", content: "Доставка по городу занимает 1 день.", byte_size: 60 }] });
+    const docsBody = await docs.json();
+    check(docs.status === 200 && docsBody.results?.[0]?.status === "added", `материал в базе знаний → ${docs.status}`);
+    const hook = await mf.dispatchFetch(`${base}/api/wa/webhooks/whapi/${agentBody.agent.id}`, { method: "POST", headers: { "content-type": "application/json", "x-webhook-secret": "wrong" }, body: "{}" });
+    check(hook.status === 401, `приём сообщений с неверным секретом → ${hook.status}`);
 
     const asset = await mf.dispatchFetch(`${base}/favicon.svg`);
     check(asset.status === 200, `статический файл → ${asset.status}`);

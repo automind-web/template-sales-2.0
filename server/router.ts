@@ -5,11 +5,12 @@ import type { Env, WaitUntil } from "./runtime.ts";
 import * as analyticsApi from "./handlers/analytics.ts";
 import * as authApi from "./handlers/auth.ts";
 import * as crmApi from "./handlers/crm.ts";
+import * as homeApi from "./handlers/home.ts";
 import * as invitationsApi from "./handlers/invitations.ts";
 import * as integrationApi from "./handlers/integration.ts";
 import * as orgApi from "./handlers/organization.ts";
 import * as trainingApi from "./handlers/training.ts";
-import * as waApi from "./handlers/whatsapp.ts";
+import { handleStudio } from "./wa/gateway.ts";
 
 type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 type Handler = (ctx: Ctx) => Promise<unknown>;
@@ -37,6 +38,8 @@ export const routes: Route[] = [
     { method: "GET", pattern: "/api/me/sessions", handler: authApi.listSessions },
     { method: "DELETE", pattern: "/api/me/sessions/:id", handler: authApi.revokeSession },
     { method: "GET", pattern: "/api/sections/:section", handler: authApi.sectionCheck },
+    { method: "GET", pattern: "/api/home", handler: homeApi.home },
+    { method: "GET", pattern: "/api/nav-status", handler: homeApi.navStatus },
 
     // Владелец сайта и приглашения
     { method: "POST", pattern: "/api/owner/activation-links", handler: invitationsApi.ownerIssueActivation },
@@ -49,7 +52,6 @@ export const routes: Route[] = [
     // Компания, филиалы, сотрудники
     { method: "GET", pattern: "/api/company", handler: orgApi.getCompany },
     { method: "PATCH", pattern: "/api/company", handler: orgApi.updateCompany },
-    { method: "GET", pattern: "/api/company/connections", handler: orgApi.connections },
     { method: "GET", pattern: "/api/branches", handler: orgApi.listBranches },
     { method: "POST", pattern: "/api/branches", handler: orgApi.createBranch },
     { method: "PATCH", pattern: "/api/branches/:id", handler: orgApi.updateBranch },
@@ -68,12 +70,8 @@ export const routes: Route[] = [
     { method: "POST", pattern: "/api/training/attempts/:id/submit", handler: trainingApi.submitAttempt },
     { method: "GET", pattern: "/api/training/files/:id", handler: trainingApi.downloadFile },
     { method: "GET", pattern: "/api/training/progress", handler: trainingApi.teamProgress },
-    { method: "GET", pattern: "/api/training/catalog", handler: trainingApi.catalog },
-    { method: "GET", pattern: "/api/training/assignments", handler: trainingApi.listAssignments },
-    { method: "POST", pattern: "/api/training/assignments", handler: trainingApi.createAssignment },
-    { method: "DELETE", pattern: "/api/training/assignments/:id", handler: trainingApi.removeAssignment },
-    { method: "GET", pattern: "/api/training/admission-rules", handler: trainingApi.getAdmissionRules },
-    { method: "PUT", pattern: "/api/training/admission-rules", handler: trainingApi.saveAdmissionRules },
+    { method: "GET", pattern: "/api/training/program", handler: trainingApi.getProgram },
+    { method: "PUT", pattern: "/api/training/program", handler: trainingApi.saveProgram },
 
     // CRM
     { method: "GET", pattern: "/api/crm/config", handler: crmApi.crmConfig },
@@ -92,20 +90,6 @@ export const routes: Route[] = [
     { method: "POST", pattern: "/api/kpi/methodology", handler: analyticsApi.saveMethodology },
     { method: "POST", pattern: "/api/kpi/methodology/:id/approve", handler: analyticsApi.approveMethodology },
     { method: "GET", pattern: "/api/kpi/report", handler: analyticsApi.kpiReport },
-
-    // WhatsApp Studio
-    { method: "GET", pattern: "/api/whatsapp/studio", handler: waApi.studio },
-    { method: "POST", pattern: "/api/whatsapp/agent", handler: waApi.createAgent },
-    { method: "PATCH", pattern: "/api/whatsapp/agent", handler: waApi.updateAgent },
-    { method: "POST", pattern: "/api/whatsapp/materials", handler: waApi.addMaterial },
-    { method: "DELETE", pattern: "/api/whatsapp/materials/:id", handler: waApi.deleteMaterial },
-    { method: "POST", pattern: "/api/whatsapp/test", handler: waApi.testDialog },
-    { method: "POST", pattern: "/api/whatsapp/channel/connect", handler: waApi.connectChannel },
-    { method: "POST", pattern: "/api/whatsapp/channel/check", handler: waApi.checkChannelState },
-    { method: "POST", pattern: "/api/whatsapp/channel/disconnect", handler: waApi.disconnectChannel },
-    { method: "POST", pattern: "/api/whatsapp/messages/retry", handler: waApi.retryMessages },
-    // Входящие сообщения Whapi: секрет в адресе, проверяется по хэшу
-    { method: "POST", pattern: "/api/whatsapp/webhook/:token", handler: waApi.webhook, external: true },
 
     // Интерфейс интеграции (Authorization: Bearer INTEGRATION_TOKEN)
     { method: "GET", pattern: "/api/integration/training/courses", handler: integrationApi.listIntegrationCourses, external: true },
@@ -136,6 +120,16 @@ export const CSRF_HEADER = "x-asc-request";
 export async function handleApiRequest(request: Request, env: Env, waitUntil: WaitUntil | null = null): Promise<Response> {
     const url = new URL(request.url);
     const method = request.method.toUpperCase();
+    if (url.pathname.startsWith("/api/wa/")) {
+        // WhatsApp Studio: свой формат ответов, права проверяются в gateway.
+        const studioCtx: Ctx = { request, env, db: createDb(env.DB), url, params: {}, now: Date.now(), cookies: parseCookies(request.headers.get("cookie")), setCookies: [], waitUntil };
+        try {
+            return await handleStudio(studioCtx);
+        } catch (error) {
+            console.error(`[wa] ${method} ${url.pathname} failed:`, error instanceof Error ? error.message : String(error));
+            return Response.json({ error: "Не удалось выполнить действие. Повторите попытку.", code: "internal_error" }, { status: 500, headers: { "cache-control": "no-store" } });
+        }
+    }
     const candidates = compiled.filter((route) => route.regex.test(url.pathname));
     if (candidates.length === 0) return errorResponse(new AppError(404, "error.notFound"));
     const route = candidates.find((candidate) => candidate.method === method);

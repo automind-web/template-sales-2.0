@@ -1,31 +1,31 @@
 "use client";
 
-import { BookOpen, ChartColumn, ChevronDown, Kanban, Lock, Menu, MessageCircle, Settings, Target, User, X, type LucideIcon } from "lucide-react";
+import { BookOpen, ChartColumn, ChevronDown, House, Kanban, Lock, Menu, MessageCircle, Settings, Target, X, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { companyConfig } from "../config/company.ts";
 import { t, type MessageKey } from "../i18n/index.ts";
-import { errorMessage } from "../lib/api.ts";
+import { api, errorMessage } from "../lib/api.ts";
 import { cn } from "../lib/utils.ts";
 import { useSession, type Section } from "./session.tsx";
 import { Card, EmptyState } from "./ui/card.tsx";
 import { FormMessage } from "./ui/field.tsx";
 
-type NavItem = { section: Section; href: string; label: MessageKey; icon: LucideIcon };
+type NavItem = { section: Section | "home"; href: string; label: MessageKey; icon: LucideIcon; lockable?: boolean };
 
 /** Основные разделы — сверху; настройки и профиль — внизу, как в AI Management */
 const MAIN_NAV: NavItem[] = [
+    { section: "home", href: "/", label: "nav.home", icon: House },
     { section: "training", href: "/training", label: "nav.training", icon: BookOpen },
-    { section: "crm", href: "/crm", label: "nav.crm", icon: Kanban },
-    { section: "kpi", href: "/kpi", label: "nav.kpi", icon: Target },
+    { section: "crm", href: "/crm", label: "nav.crm", icon: Kanban, lockable: true },
+    { section: "kpi", href: "/kpi", label: "nav.kpi", icon: Target, lockable: true },
     { section: "stats", href: "/stats", label: "nav.stats", icon: ChartColumn },
     { section: "whatsapp", href: "/whatsapp", label: "nav.whatsapp", icon: MessageCircle },
 ];
-const BOTTOM_NAV: NavItem[] = [
-    { section: "settings", href: "/settings", label: "nav.settings", icon: Settings },
-    { section: "profile", href: "/profile", label: "nav.profile", icon: User },
-];
+const BOTTOM_NAV: NavItem[] = [{ section: "settings", href: "/settings", label: "nav.settings", icon: Settings }];
+
+type NavStatus = { overdue: number; whatsapp: "on" | "off" | null };
 
 const ShellContext = createContext<{ openMenu: () => void }>({ openMenu: () => {} });
 
@@ -42,51 +42,116 @@ export function CompanyMark({ name, className }: { name: string; className?: str
     );
 }
 
-function NavLink({ item, active, onNavigate }: { item: NavItem; active: boolean; onNavigate: () => void }) {
+function NavLink({ item, active, onNavigate, locked, badge }: { item: NavItem; active: boolean; onNavigate: () => void; locked?: boolean; badge?: ReactNode }) {
     const Icon = item.icon;
+    if (locked) {
+        return (
+            <span aria-disabled="true" title={t("nav.lockedHint")} className="flex cursor-not-allowed items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-semibold text-foreground/40">
+                <Icon aria-hidden className="size-[19px] shrink-0" strokeWidth={1.75} />
+                <span className="flex-1 break-anywhere">{t(item.label)}</span>
+                <Lock aria-hidden className="size-3.5" />
+                <span className="sr-only">{t("nav.lockedHint")}</span>
+            </span>
+        );
+    }
     return (
         <Link
             href={item.href}
             onClick={onNavigate}
             aria-current={active ? "page" : undefined}
             className={cn(
-                "flex items-center gap-3 rounded-lg px-3 py-2.5 text-[15px] font-semibold transition-colors",
-                active ? "bg-selected text-foreground" : "text-foreground/80 hover:bg-muted"
+                "group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-semibold transition-all duration-150",
+                active ? "bg-surface text-foreground shadow-[0_1px_2px_#1d24330f,0_4px_14px_-8px_#1d243326]" : "text-foreground/75 hover:bg-muted hover:text-foreground"
             )}
         >
-            <Icon aria-hidden className={cn("size-[19px] shrink-0", active ? "text-foreground" : "text-foreground/60")} strokeWidth={1.75} />
-            <span className="break-anywhere">{t(item.label)}</span>
+            {active ? <span aria-hidden className="absolute top-2 bottom-2 left-0 w-[3px] rounded-full bg-primary" /> : null}
+            <Icon aria-hidden className={cn("size-[19px] shrink-0 transition-colors", active ? "text-primary" : "text-foreground/55 group-hover:text-foreground/80")} strokeWidth={1.75} />
+            <span className="flex-1 break-anywhere">{t(item.label)}</span>
+            {badge}
         </Link>
     );
+}
+
+function initials(name: string) {
+    const parts = name.trim().split(/\s+/);
+    return ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase() || "?";
 }
 
 function Sidebar({ onNavigate, closeSpace = false }: { onNavigate: () => void; closeSpace?: boolean }) {
     const { me } = useSession();
     const pathname = usePathname() ?? "/";
-    const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
-    const visible = (items: NavItem[]) => items.filter((item) => me.sections[item.section]);
+    const [status, setStatus] = useState<NavStatus | null>(null);
+    const gated = me.user.role === "employee" && !me.user.admitted;
+    useEffect(() => {
+        if (gated) return;
+        const controller = new AbortController();
+        api<NavStatus>("/api/nav-status", { signal: controller.signal }).then(setStatus, () => undefined);
+        return () => controller.abort();
+    }, [pathname, gated, me.selectedBranchId]);
+    const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`));
+    const visible = (item: NavItem) => (item.section === "home" ? !gated : me.sections[item.section] || (gated && item.lockable));
+    const badgeFor = (item: NavItem): ReactNode => {
+        if (item.section === "crm" && status && status.overdue > 0) {
+            return (
+                <span className="min-w-6 rounded-full bg-danger px-1.5 py-0.5 text-center text-[11px] leading-4 font-bold text-white" title={t("nav.overdue", { count: status.overdue })}>
+                    {status.overdue > 99 ? "99+" : status.overdue}
+                    <span className="sr-only">{t("nav.overdue", { count: status.overdue })}</span>
+                </span>
+            );
+        }
+        if (item.section === "whatsapp" && status?.whatsapp) {
+            const on = status.whatsapp === "on";
+            return (
+                <span className={cn("size-2 rounded-full", on ? "live-dot bg-success" : "bg-foreground/25")} title={on ? t("nav.waOn") : t("nav.waOff")}>
+                    <span className="sr-only">{on ? t("nav.waOn") : t("nav.waOff")}</span>
+                </span>
+            );
+        }
+        return null;
+    };
+    const profileActive = isActive("/profile");
     return (
         <div className="flex h-full flex-col gap-4 p-3">
-            <Link href="/" onClick={onNavigate} className={cn("flex min-w-0 items-center gap-2.5 px-1 pt-1", closeSpace && "pr-10")}>
-                <CompanyMark name={me.company.name} />
+            <Link href={gated ? "/training" : "/"} onClick={onNavigate} className={cn("flex min-w-0 items-center gap-2.5 px-1 pt-1", closeSpace && "pr-10")}>
+                <CompanyMark name={me.company.name} className="shadow-md shadow-primary/25" />
                 <span className="truncate text-[15px] font-bold" title={me.company.name}>
                     {me.company.name}
                 </span>
             </Link>
             <nav aria-label={t("nav.menu")} className="flex min-h-0 flex-1 flex-col justify-between gap-4 overflow-y-auto">
                 <ul className="grid gap-1">
-                    {visible(MAIN_NAV).map((item) => (
+                    {MAIN_NAV.filter(visible).map((item) => (
                         <li key={item.href}>
-                            <NavLink item={item} active={isActive(item.href)} onNavigate={onNavigate} />
+                            <NavLink item={item} active={isActive(item.href)} onNavigate={onNavigate} locked={gated && item.lockable} badge={badgeFor(item)} />
                         </li>
                     ))}
                 </ul>
                 <ul className="grid gap-1">
-                    {visible(BOTTOM_NAV).map((item) => (
+                    {BOTTOM_NAV.filter(visible).map((item) => (
                         <li key={item.href}>
                             <NavLink item={item} active={isActive(item.href)} onNavigate={onNavigate} />
                         </li>
                     ))}
+                    <li>
+                        <Link
+                            href="/profile"
+                            onClick={onNavigate}
+                            aria-current={profileActive ? "page" : undefined}
+                            className={cn("flex items-center gap-3 rounded-xl border p-2.5 transition-all", profileActive ? "border-primary/30 bg-surface shadow-sm" : "border-transparent hover:bg-muted")}
+                        >
+                            <span aria-hidden className="grid size-9 shrink-0 place-items-center rounded-full bg-gradient-to-br from-primary to-primary/70 text-[13px] font-bold text-primary-foreground">
+                                {initials(me.user.displayName)}
+                            </span>
+                            <span className="min-w-0">
+                                <span className="block truncate text-sm font-semibold">{me.user.displayName}</span>
+                                <span className="block truncate text-xs text-muted-foreground">
+                                    {t(`role.${me.user.role}` as MessageKey)}
+                                    {me.user.branchName ? ` · ${me.user.branchName}` : ""}
+                                </span>
+                            </span>
+                            <span className="sr-only">{t("nav.profile")}</span>
+                        </Link>
+                    </li>
                 </ul>
             </nav>
         </div>
@@ -109,7 +174,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <a href="#content" className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded-lg focus:bg-surface focus:px-3 focus:py-2">
                     {t("nav.skipToContent")}
                 </a>
-                <aside className="sticky top-0 hidden h-screen w-60 shrink-0 border-r border-border bg-background md:block">
+                <aside className="sticky top-0 hidden h-screen w-64 shrink-0 border-r border-border bg-background md:block">
                     <Sidebar onNavigate={() => {}} />
                 </aside>
                 {menuOpen ? (
@@ -197,7 +262,7 @@ export function Page({ title, children, admissionBanner = true }: { title: strin
                     <BranchSwitcher />
                 </div>
             </header>
-            <main className="w-full px-4 py-5 sm:px-6">
+            <main className="page-in w-full px-4 py-5 sm:px-6">
                 {admissionBanner && me.user.role === "employee" && !me.user.admitted ? (
                     <div className="mb-4">
                         <FormMessage kind="info">{t("shell.notAdmitted")}</FormMessage>

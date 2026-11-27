@@ -98,15 +98,17 @@ test("интеграция: токен, утверждённость, прове
     assert.equal(versions[0]!.title, "Основы продаж v1", "старая версия хранится без изменений");
 });
 
-test("чистый старт: правило допуска ссылается на ещё не загруженный курс", async () => {
-    const { employee, director } = await setup();
+test("чистый старт: стартовая программа создаётся сама, доступ — после теста", async () => {
+    const { employee } = await setup();
     const mine = await employee.get<MyCourses>("/api/training/courses");
     assert.equal(mine.status, 200);
-    assert.equal(mine.body.courses.length, 0);
-    assert.deepEqual(mine.body.admission.missingCourses, ["sales-basics"]);
-    const rules = await director.get<{ source: string; rules: Array<{ courseKey: string; courseTitle: string | null }> }>("/api/training/admission-rules");
-    assert.equal(rules.body.source, "config");
-    assert.equal(rules.body.rules[0]!.courseTitle, null);
+    assert.equal(mine.body.courses.length, 1, "одна программа обучения");
+    assert.equal(mine.body.courses[0]!.key, "sales-basics");
+    assert.equal(mine.body.courses[0]!.lessons.total, 3);
+    assert.equal(mine.body.courses[0]!.requiredForAdmission, true);
+    assert.deepEqual(mine.body.admission.missingCourses, []);
+    assert.equal(mine.body.admission.admitted, false);
+    assert.equal((await employee.get("/api/crm/leads")).status, 403, "рабочее место закрыто до теста");
 });
 
 test("тест завершается по своей версии, новая редакция — со следующей попытки; допуск выдаётся автоматически", async () => {
@@ -182,58 +184,39 @@ test("недостаточный результат не даёт допуска
     assert.equal(second.body.attempt.result!.passed, false, "60% < 61%");
 });
 
-test("правила допуска по филиалам; права на правила, назначения и прогресс", async () => {
-    const { env, director, manager, employee, southEmployee, south } = await setup();
-    await integration(env, "POST", "/api/integration/training/courses/sales-basics/versions", edition(1));
-    await integration(env, "POST", "/api/integration/training/courses/south-course/versions", { ...edition(1), externalRef: "south-1", title: "Курс Юга" });
+test("программа: правит только директор; проходной балл — условие доступа; прогресс по филиалам", async () => {
+    const { director, manager, employee } = await setup();
+    type Program = { title: string; description: string; version: number; passPercent: number; lessons: Array<{ title: string; body: string; minutes: number | null }>; questions: Array<{ text: string; options: string[]; correct: number[] }> };
+    assert.equal((await manager.get("/api/training/program")).status, 403);
+    assert.equal((await employee.get("/api/training/program")).status, 403);
+    const program = await director.get<Program>("/api/training/program");
+    assert.equal(program.body.version, 1);
+    assert.equal(program.body.questions[0]!.correct.length, 1, "директор видит правильные ответы");
 
-    assert.equal((await manager.put("/api/training/admission-rules", { rules: [] })).status, 403);
-    assert.equal((await director.put("/api/training/admission-rules", { rules: [{ courseKey: "sales-basics", minScorePercent: 0 }] })).status, 400);
-    assert.equal(
-        (
-            await director.put("/api/training/admission-rules", {
-                rules: [
-                    { courseKey: "sales-basics", minScorePercent: 80 },
-                    { courseKey: "south-course", minScorePercent: 100, branchId: south },
-                ],
-            })
-        ).status,
-        200
-    );
-    const northCourses = await employee.get<MyCourses>("/api/training/courses");
-    assert.deepEqual(northCourses.body.courses.map((course) => course.key), ["sales-basics"]);
-    const southCourses = await southEmployee.get<MyCourses>("/api/training/courses");
-    assert.deepEqual(southCourses.body.courses.map((course) => course.key), ["south-course"], "правило филиала заменяет общее");
-    assert.equal(southCourses.body.courses[0]!.minScorePercent, 100);
+    const edited = { ...program.body, passPercent: 60, lessons: [{ title: "Наш продукт", body: "Мы печём хлеб.", minutes: 3 }], questions: [{ text: "Что мы печём?", options: ["Хлеб", "Кирпичи"], correct: [0] }] };
+    assert.equal((await manager.put("/api/training/program", edited)).status, 403);
+    assert.equal((await director.put("/api/training/program", { ...edited, questions: [{ text: "?", options: ["А", "Б"], correct: [] }] })).status, 400, "без правильного ответа не сохраняется");
+    assert.equal((await director.put("/api/training/program", { ...edited, lessons: [] })).status, 400);
+    const saved = await director.put<Program>("/api/training/program", edited);
+    assert.equal(saved.status, 200);
+    assert.equal(saved.body.version, 2);
+    assert.equal((await director.put<Program>("/api/training/program", edited)).body.version, 2, "без изменений новая версия не создаётся");
 
-    // Курс Юга не назначен сотруднику Севера: по прямой ссылке — «не найдено»
-    const southCourseId = southCourses.body.courses[0]!.id;
-    assert.equal((await employee.get(`/api/training/courses/${southCourseId}`)).status, 404);
-    assert.equal((await employee.post(`/api/training/courses/${southCourseId}/attempts`)).status, 404);
+    const mine = await employee.get<MyCourses>("/api/training/courses");
+    assert.equal(mine.body.courses[0]!.minScorePercent, 60, "проходной балл программы — условие доступа");
+    assert.equal(mine.body.courses[0]!.lessons.total, 1);
 
-    // Назначения: руководитель — только свой филиал
-    assert.equal((await manager.post("/api/training/assignments", { courseId: southCourseId, scope: "company" })).status, 403);
-    const southUserId = (env.DB.sqlite.prepare("SELECT id FROM users WHERE login = 'south.employee'").get() as { id: string }).id;
-    assert.equal((await manager.post("/api/training/assignments", { courseId: southCourseId, scope: "user", userId: southUserId })).status, 404);
-    const assigned = await manager.post<{ id: string; created: boolean }>("/api/training/assignments", { courseId: southCourseId, scope: "branch" });
-    assert.equal(assigned.body.created, true);
-    assert.equal((await manager.post<{ created: boolean }>("/api/training/assignments", { courseId: southCourseId, scope: "branch" })).body.created, false);
-    const withAssigned = await employee.get<MyCourses>("/api/training/courses");
-    assert.deepEqual(withAssigned.body.courses.map((course) => course.key).sort(), ["sales-basics", "south-course"]);
-    assert.equal(withAssigned.body.courses.find((course) => course.key === "south-course")!.requiredForAdmission, false);
-
-    // Прогресс: руководитель видит только свой филиал
-    const progress = await manager.get<{ employees: Array<{ login: string; courses: unknown[]; admitted: boolean }> }>("/api/training/progress");
+    // Прогресс: руководитель — только свой филиал, директор — все
+    const progress = await manager.get<{ employees: Array<{ login: string }> }>("/api/training/progress");
     assert.deepEqual(progress.body.employees.map((person) => person.login), ["north.employee"]);
-    assert.equal((await manager.get(`/api/training/progress?branchId=${south}`)).status, 403);
     const all = await director.get<{ employees: Array<{ login: string }> }>("/api/training/progress?branchId=*");
     assert.deepEqual(all.body.employees.map((person) => person.login).sort(), ["north.employee", "south.employee"]);
+    assert.equal((await employee.get("/api/training/progress")).status, 403);
 
-    // Сотруднику закрыты управленческие разделы
-    for (const path of ["/api/training/progress", "/api/training/catalog", "/api/training/assignments", "/api/training/admission-rules"]) {
-        assert.equal((await employee.get(path)).status, 403, path);
-    }
-    assert.equal((await manager.delete(`/api/training/assignments/${assigned.body.id}`)).status, 200);
+    // Отметка «Прошёл обучение» от руководителя открывает рабочее место сразу
+    const employeeId = (await manager.get<{ employees: Array<{ id: string }> }>("/api/training/progress")).body.employees[0]!.id;
+    assert.equal((await manager.put(`/api/users/${employeeId}/admission`, { admitted: true })).status, 200);
+    assert.equal((await employee.get("/api/crm/config")).status, 200);
 });
 
 test("файлы материалов: R2 + метаданные в D1, доступ только к своим курсам", async () => {
@@ -261,13 +244,8 @@ test("файлы материалов: R2 + метаданные в D1, дост
     assert.match(download.headers.get("cache-control") ?? "", /private/);
     assert.deepEqual([...new Uint8Array(await download.arrayBuffer())], [0x25, 0x50, 0x44, 0x46, 0xff]);
 
-    // Курс назначен правилом общим для всех филиалов, поэтому сотрудник Юга его видит;
-    // а после отдельного правила филиала Юга — уже нет.
-    const southId = (env.DB.sqlite.prepare("SELECT id FROM branches WHERE name = 'Юг'").get() as { id: string }).id;
-    const director = new TestClient(env, "10.0.0.2");
-    await director.post("/api/auth/login", { login: "director", password: "director-password-1" });
-    await director.put("/api/training/admission-rules", { rules: [{ courseKey: "sales-basics", minScorePercent: 80 }, { courseKey: "other", minScorePercent: 80, branchId: southId }] });
-    assert.equal((await southEmployee.raw(`/api/training/files/${uploaded.body.fileId}`)).status, 404, "чужой файл недоступен по прямой ссылке");
+    // Файл программы доступен любому сотруднику компании, но не без входа.
+    assert.equal((await southEmployee.raw(`/api/training/files/${uploaded.body.fileId}`)).status, 200);
     assert.equal((await new TestClient(env).raw(`/api/training/files/${uploaded.body.fileId}`)).status, 401);
 });
 

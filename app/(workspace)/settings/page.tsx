@@ -4,22 +4,20 @@ import { Page, SectionGate } from "../../../components/app-shell.tsx";
 import { useSession } from "../../../components/session.tsx";
 import { BranchesSettings } from "../../../components/settings/branches.tsx";
 import { CompanySettings } from "../../../components/settings/company.tsx";
-import { ConnectionsSettings } from "../../../components/settings/connections.tsx";
 import { InvitationsSettings } from "../../../components/settings/invitations.tsx";
 import { MembersSettings } from "../../../components/settings/members.tsx";
 import { ProcessSettings } from "../../../components/settings/process.tsx";
 import { Tabs, useTab, type TabItem } from "../../../components/ui/tabs.tsx";
 import { t } from "../../../i18n/index.ts";
 
-type TabKey = "company" | "process" | "branches" | "members" | "invitations" | "connections";
+type TabKey = "company" | "branches" | "members" | "invitations" | "process";
 
 const DIRECTOR_TABS: ReadonlyArray<TabItem<TabKey>> = [
     { key: "company", label: t("settings.tab.company") },
-    { key: "process", label: t("settings.tab.process") },
     { key: "branches", label: t("settings.tab.branches") },
     { key: "members", label: t("settings.tab.members") },
     { key: "invitations", label: t("settings.tab.invitations") },
-    { key: "connections", label: t("settings.tab.connections") },
+    { key: "process", label: t("settings.tab.process") },
 ];
 
 /** Руководитель филиала управляет только участниками и приглашениями своего филиала */
@@ -48,7 +46,6 @@ function Settings() {
             {tab === "branches" ? <BranchesSettings /> : null}
             {tab === "members" ? <MembersSettings /> : null}
             {tab === "invitations" ? <InvitationsSettings /> : null}
-            {tab === "connections" ? <ConnectionsSettings /> : null}
         </Page>
     );
 }

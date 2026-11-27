@@ -308,3 +308,41 @@ export async function evaluateRules(db: Db, user: UserRef) {
     }
     return result;
 }
+
+// --- Единая программа обучения ------------------------------------------
+
+export const PROGRAM_KEY = companyConfig.training.key;
+
+/** Программа из простых полей редактора (или из config) → содержимое редакции */
+export function programContent(input: { passPercent: number; lessons: Array<{ title: string; body: string; minutes?: number | null }>; questions: Array<{ text: string; options: string[]; correct: number[] }> }): CourseContent {
+    return {
+        lessons: input.lessons.map((lesson, index) => ({ key: `l${index + 1}`, title: lesson.title, body: lesson.body, fileIds: [], durationMinutes: lesson.minutes ?? null })),
+        test: {
+            passPercent: input.passPercent,
+            questions: input.questions.map((question, index) => ({
+                key: `q${index + 1}`,
+                text: question.text,
+                kind: question.correct.length > 1 ? "multiple" : "single",
+                options: question.options.map((option, optionIndex) => ({ key: String.fromCharCode(97 + optionIndex), text: option })),
+                correct: question.correct.map((optionIndex) => String.fromCharCode(97 + optionIndex)),
+            })),
+        },
+    };
+}
+
+/** Курс программы; при первом обращении создаётся из стартовой программы config/company.ts */
+export async function ensureProgram(db: Db, companyId: string, now: number) {
+    let course = await db.select().from(courses).where(and(eq(courses.companyId, companyId), eq(courses.key, PROGRAM_KEY))).get();
+    if (course && (await latestVersion(db, course.id))) return course;
+    if (!course) {
+        await db.insert(courses).values({ id: newId(), companyId, key: PROGRAM_KEY, title: companyConfig.training.title, createdAt: now }).onConflictDoNothing();
+        course = await db.select().from(courses).where(and(eq(courses.companyId, companyId), eq(courses.key, PROGRAM_KEY))).get();
+        if (!course) throw new AppError(500, "error.internal");
+    }
+    const content = programContent(companyConfig.training);
+    await db
+        .insert(courseVersions)
+        .values({ id: newId(), companyId, courseId: course.id, version: 1, title: companyConfig.training.title, description: companyConfig.training.description, content: JSON.stringify(content), checksum: "starter", externalRef: null, source: "site", createdAt: now })
+        .onConflictDoNothing();
+    return course;
+}

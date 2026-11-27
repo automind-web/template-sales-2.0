@@ -10,6 +10,20 @@ const eslintConfig = defineConfig([
     // чтобы сбросить состояние клиента и перечитать права с сервера.
     rules: { "@next/next/no-location-assign-relative-destination": "off" },
   },
+  {
+    // WhatsApp Studio перенесена из шаблона WhatsApp Agent Studio без переписывания
+    // (логика проверена тестами шаблона, см. test/whatsapp-studio.test.ts).
+    files: ["components/wa-studio/**", "server/wa/**/*.mjs"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unused-expressions": "off",
+      "@typescript-eslint/no-unused-vars": "off",
+      "react-hooks/refs": "off",
+      "react-hooks/set-state-in-effect": "off",
+      "react-hooks/exhaustive-deps": "off",
+      "react-hooks/immutability": "off",
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:

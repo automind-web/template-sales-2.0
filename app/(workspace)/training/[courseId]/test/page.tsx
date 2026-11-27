@@ -5,7 +5,7 @@ import { useParams, usePathname, useRouter, useSearchParams } from "next/navigat
 import { useEffect, useRef, useState } from "react";
 import { Page, SectionGate } from "../../../../../components/app-shell.tsx";
 import { useSession } from "../../../../../components/session.tsx";
-import { AdmissionRulesStatus } from "../../../../../components/training/my-courses.tsx";
+import { AdmissionRulesStatus } from "../../../../../components/training/program.tsx";
 import type { AttemptView, RuleStatus } from "../../../../../components/training/types.ts";
 import { Button, buttonVariants } from "../../../../../components/ui/button.tsx";
 import { Card, Spinner } from "../../../../../components/ui/card.tsx";

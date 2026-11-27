@@ -1,19 +1,24 @@
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
-import { admissionRules, admissions, branches, courseAssignments, courses, courseVersions, lessonProgress, testAttempts, trainingFiles, users } from "../../db/schema.ts";
-import { loadCompanyBranch, resolveBranchScope } from "../access.ts";
+import { admissionRules, admissions, branches, courses, courseVersions, lessonProgress, testAttempts, trainingFiles, users } from "../../db/schema.ts";
+import { resolveBranchScope } from "../access.ts";
 import { audit } from "../audit.ts";
 import { requireActor, requireRole, type Actor } from "../auth.ts";
 import type { Ctx } from "../context.ts";
 import { isUniqueViolation, newId } from "../db.ts";
-import { AppError, badRequest, readJson, str } from "../http.ts";
+import { AppError, readJson, str } from "../http.ts";
+import { sha256Hex } from "../crypto.ts";
+import type { MessageKey } from "../../i18n/index.ts";
 import {
     applyAdmissionRules,
     assignedCourseIds,
     companyRules,
+    ensureProgram,
     evaluateRules,
     latestVersion,
     markRulesCustomized,
     parseStoredContent,
+    programContent,
+    PROGRAM_KEY,
     publicQuestions,
     rulesForBranch,
     sanitizeAnswers,
@@ -81,6 +86,7 @@ async function attemptSummaries(ctx: Ctx, userIds: string[], courseIds: string[]
 
 export async function myCourses(ctx: Ctx) {
     const actor = await requireActor(ctx);
+    await ensureProgram(ctx.db, actor.companyId, ctx.now);
     const user = { id: actor.userId, companyId: actor.companyId, role: actor.role, branchId: actor.branchId };
     const rules = await companyRules(ctx.db, actor.companyId);
     const assigned = await assignedCourseIds(ctx.db, user, rules);
@@ -373,6 +379,7 @@ export async function downloadFile(ctx: Ctx) {
 export async function teamProgress(ctx: Ctx) {
     const actor = await requireActor(ctx);
     if (!isStaff(actor)) throw new AppError(403, "auth.forbidden");
+    await ensureProgram(ctx.db, actor.companyId, ctx.now);
     const scope = await resolveBranchScope(ctx, actor, ctx.url.searchParams.get("branchId"), { allowAll: true });
     const conditions = [eq(users.companyId, actor.companyId), eq(users.role, "employee"), eq(users.status, "active")];
     if (scope.kind === "one") conditions.push(eq(users.branchId, scope.branchId));
@@ -435,175 +442,92 @@ export async function teamProgress(ctx: Ctx) {
     return { employees: rows };
 }
 
-/** Каталог курсов компании с историей версий (для руководителя и директора) */
-export async function catalog(ctx: Ctx) {
-    const actor = await requireActor(ctx);
-    if (!isStaff(actor)) throw new AppError(403, "auth.forbidden");
-    const rows = await ctx.db.select().from(courses).where(eq(courses.companyId, actor.companyId)).orderBy(courses.title).all();
-    const versions = rows.length
-        ? await ctx.db
-              .select({ id: courseVersions.id, courseId: courseVersions.courseId, version: courseVersions.version, title: courseVersions.title, createdAt: courseVersions.createdAt, externalRef: courseVersions.externalRef, content: courseVersions.content })
-              .from(courseVersions)
-              .where(inArray(courseVersions.courseId, rows.map((row) => row.id)))
-              .orderBy(desc(courseVersions.version))
-              .all()
-        : [];
-    return {
-        courses: rows.map((row) => ({
-            id: row.id,
-            key: row.key,
-            title: row.title,
-            archived: row.archivedAt !== null,
-            versions: versions
-                .filter((version) => version.courseId === row.id)
-                .map((version) => {
-                    const content = parseStoredContent(version.content);
-                    return { id: version.id, version: version.version, title: version.title, createdAt: version.createdAt, externalRef: version.externalRef, lessons: content.lessons.length, questions: content.test.questions.length, passPercent: content.test.passPercent };
-                }),
-        })),
-    };
-}
+// --- Программа обучения (директор) ----------------------------------------
 
-export async function listAssignments(ctx: Ctx) {
-    const actor = await requireActor(ctx);
-    if (!isStaff(actor)) throw new AppError(403, "auth.forbidden");
-    const scope = await resolveBranchScope(ctx, actor, ctx.url.searchParams.get("branchId"), { allowAll: true });
-    const rows = await ctx.db
-        .select({
-            id: courseAssignments.id,
-            courseId: courseAssignments.courseId,
-            courseTitle: courses.title,
-            scope: courseAssignments.scope,
-            branchId: courseAssignments.branchId,
-            branchName: branches.name,
-            userId: courseAssignments.userId,
-            userName: users.displayName,
-            userBranchId: users.branchId,
-            createdAt: courseAssignments.createdAt,
-        })
-        .from(courseAssignments)
-        .innerJoin(courses, eq(courses.id, courseAssignments.courseId))
-        .leftJoin(branches, eq(branches.id, courseAssignments.branchId))
-        .leftJoin(users, eq(users.id, courseAssignments.userId))
-        .where(and(eq(courseAssignments.companyId, actor.companyId), isNull(courseAssignments.removedAt)))
-        .orderBy(desc(courseAssignments.createdAt))
-        .all();
-    const visible = rows.filter((row) => {
-        if (scope.kind === "all") return true;
-        if (row.scope === "company") return true;
-        if (row.scope === "branch") return row.branchId === scope.branchId;
-        return row.userBranchId === scope.branchId;
-    });
-    return {
-        assignments: visible.map(({ userBranchId: _userBranchId, ...row }) => ({
-            ...row,
-            canRemove: actor.role === "director" || (row.scope === "branch" && row.branchId === actor.branchId) || (row.scope === "user" && _userBranchId === actor.branchId),
-        })),
-    };
-}
-
-export async function createAssignment(ctx: Ctx) {
-    const actor = await requireActor(ctx);
-    if (!isStaff(actor)) throw new AppError(403, "auth.forbidden");
-    const body = await readJson(ctx.request);
-    const courseId = str(body, "courseId", { max: 64 });
-    const course = await ctx.db.select().from(courses).where(and(eq(courses.id, courseId), eq(courses.companyId, actor.companyId))).get();
-    if (!course) throw badRequest("training.courseNotFound", { courseId: "training.courseNotFound" });
-    const scope = str(body, "scope", { max: 10 });
-    let branchId: string | null = null;
-    let userId: string | null = null;
-    if (scope === "company") {
-        requireRole(actor, "director");
-    } else if (scope === "branch") {
-        const requested = actor.role === "manager" ? actor.branchId : str(body, "branchId", { max: 64 });
-        branchId = (await loadCompanyBranch(ctx, actor, requested ?? "")).id;
-    } else if (scope === "user") {
-        const target = await ctx.db.select().from(users).where(and(eq(users.id, str(body, "userId", { max: 64 })), eq(users.companyId, actor.companyId))).get();
-        if (!target || (actor.role === "manager" && target.branchId !== actor.branchId)) throw new AppError(404, "team.userNotFound");
-        userId = target.id;
-    } else {
-        throw badRequest("validation.invalidInput", { scope: "validation.invalidInput" });
-    }
-    const duplicate = await ctx.db
-        .select({ id: courseAssignments.id })
-        .from(courseAssignments)
-        .where(
-            and(
-                eq(courseAssignments.courseId, course.id),
-                eq(courseAssignments.scope, scope),
-                isNull(courseAssignments.removedAt),
-                branchId ? eq(courseAssignments.branchId, branchId) : isNull(courseAssignments.branchId),
-                userId ? eq(courseAssignments.userId, userId) : isNull(courseAssignments.userId)
-            )
-        )
-        .get();
-    if (duplicate) return { id: duplicate.id, created: false };
-    const id = newId();
-    await ctx.db.insert(courseAssignments).values({ id, companyId: actor.companyId, courseId: course.id, scope, branchId, userId, createdBy: actor.userId, createdAt: ctx.now });
-    await audit(ctx.db, { companyId: actor.companyId, actorUserId: actor.userId, action: "training.assign", entityType: "course", entityId: course.id, data: { scope, branchId, userId } }, ctx.now);
-    return { id, created: true };
-}
-
-export async function removeAssignment(ctx: Ctx) {
-    const actor = await requireActor(ctx);
-    if (!isStaff(actor)) throw new AppError(403, "auth.forbidden");
-    const row = await ctx.db
-        .select({ id: courseAssignments.id, scope: courseAssignments.scope, branchId: courseAssignments.branchId, userBranchId: users.branchId })
-        .from(courseAssignments)
-        .leftJoin(users, eq(users.id, courseAssignments.userId))
-        .where(and(eq(courseAssignments.id, ctx.params["id"] ?? ""), eq(courseAssignments.companyId, actor.companyId), isNull(courseAssignments.removedAt)))
-        .get();
-    if (!row) throw new AppError(404, "error.notFound");
-    const allowed = actor.role === "director" || (row.scope === "branch" && row.branchId === actor.branchId) || (row.scope === "user" && row.userBranchId === actor.branchId);
-    if (!allowed) throw new AppError(403, "auth.forbidden");
-    await ctx.db.update(courseAssignments).set({ removedAt: ctx.now }).where(eq(courseAssignments.id, row.id));
-    return { ok: true };
-}
-
-// --- Правила допуска -----------------------------------------------------
-
-export async function getAdmissionRules(ctx: Ctx) {
-    const actor = await requireActor(ctx);
-    if (!isStaff(actor)) throw new AppError(403, "auth.forbidden");
-    const rules = await companyRules(ctx.db, actor.companyId);
-    const visible = actor.role === "director" ? rules : rules.filter((rule) => rule.branchId === null || rule.branchId === actor.branchId);
-    const courseRows = await ctx.db.select({ key: courses.key, title: courses.title }).from(courses).where(eq(courses.companyId, actor.companyId)).all();
-    const titles = new Map(courseRows.map((row) => [row.key, row.title]));
-    return {
-        source: rules[0]?.source ?? "company",
-        canEdit: actor.role === "director",
-        rules: visible.map((rule) => ({ ...rule, role: "employee", courseTitle: titles.get(rule.courseKey) ?? null })),
-    };
-}
-
-/** Директор задаёт полный набор правил: по ролям (сейчас — сотрудник) и филиалам */
-export async function saveAdmissionRules(ctx: Ctx) {
+/** Программа в виде полей редактора: уроки и вопросы с вариантами (с правильными ответами) */
+export async function getProgram(ctx: Ctx) {
     const actor = await requireActor(ctx);
     requireRole(actor, "director");
-    const body = await readJson(ctx.request);
-    const raw = body["rules"];
-    if (!Array.isArray(raw) || raw.length > 50) throw badRequest("validation.invalidInput");
-    const parsed: Array<{ branchId: string | null; courseKey: string; minScorePercent: number }> = [];
-    for (const item of raw) {
-        if (typeof item !== "object" || item === null) throw badRequest("validation.invalidInput");
-        const rule = item as Record<string, unknown>;
-        const courseKey = typeof rule["courseKey"] === "string" ? rule["courseKey"].trim().toLowerCase() : "";
-        const minScore = rule["minScorePercent"];
-        if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(courseKey)) throw badRequest("training.ruleCourseInvalid");
-        if (typeof minScore !== "number" || !Number.isInteger(minScore) || minScore < 1 || minScore > 100) throw badRequest("training.ruleScoreInvalid");
-        let branchId: string | null = null;
-        if (typeof rule["branchId"] === "string" && rule["branchId"]) branchId = (await loadCompanyBranch(ctx, actor, rule["branchId"])).id;
-        if (parsed.some((existing) => existing.branchId === branchId && existing.courseKey === courseKey)) throw badRequest("training.ruleDuplicate");
-        parsed.push({ branchId, courseKey, minScorePercent: minScore });
+    const course = await ensureProgram(ctx.db, actor.companyId, ctx.now);
+    const version = (await latestVersion(ctx.db, course.id))!;
+    const content = parseStoredContent(version.content);
+    return {
+        title: version.title,
+        description: version.description ?? "",
+        version: version.version,
+        updatedAt: version.createdAt,
+        passPercent: content.test.passPercent,
+        lessons: content.lessons.map((lesson) => ({ title: lesson.title, body: lesson.body, minutes: lesson.durationMinutes })),
+        questions: content.test.questions.map((question) => ({
+            text: question.text,
+            options: question.options.map((option) => option.text),
+            correct: question.correct.map((key) => question.options.findIndex((option) => option.key === key)).filter((index) => index >= 0),
+        })),
+    };
+}
+
+function programInput(body: Record<string, unknown>) {
+    const invalid = (field: string, key: MessageKey = "training.programInvalid") => new AppError(400, key, { fields: { [field]: key } });
+    const title = str(body, "title", { max: 120 });
+    const description = typeof body["description"] === "string" ? body["description"].trim().slice(0, 500) : "";
+    const passPercent = body["passPercent"];
+    if (typeof passPercent !== "number" || !Number.isInteger(passPercent) || passPercent < 1 || passPercent > 100) throw invalid("passPercent", "training.ruleScoreInvalid");
+    const lessonsRaw = Array.isArray(body["lessons"]) ? body["lessons"] : [];
+    const questionsRaw = Array.isArray(body["questions"]) ? body["questions"] : [];
+    if (lessonsRaw.length < 1 || lessonsRaw.length > 50) throw invalid("lessons", "training.programNeedsLesson");
+    if (questionsRaw.length < 1 || questionsRaw.length > 100) throw invalid("questions", "training.programNeedsQuestion");
+    const lessons = lessonsRaw.map((raw, index) => {
+        const item = (raw ?? {}) as Record<string, unknown>;
+        const lessonTitle = typeof item["title"] === "string" ? item["title"].trim() : "";
+        const lessonBody = typeof item["body"] === "string" ? item["body"].trim() : "";
+        if (!lessonTitle || lessonTitle.length > 200 || lessonBody.length > 50_000) throw invalid(`lessons.${index}`);
+        const minutes = typeof item["minutes"] === "number" && Number.isInteger(item["minutes"]) && item["minutes"] > 0 && item["minutes"] <= 600 ? item["minutes"] : null;
+        return { title: lessonTitle, body: lessonBody, minutes };
+    });
+    const questions = questionsRaw.map((raw, index) => {
+        const item = (raw ?? {}) as Record<string, unknown>;
+        const text = typeof item["text"] === "string" ? item["text"].trim() : "";
+        const options = (Array.isArray(item["options"]) ? item["options"] : []).map((option) => (typeof option === "string" ? option.trim() : "")).filter(Boolean);
+        const correct = [...new Set((Array.isArray(item["correct"]) ? item["correct"] : []).filter((value): value is number => typeof value === "number" && Number.isInteger(value) && value >= 0 && value < options.length))];
+        if (!text || text.length > 2_000 || options.length < 2 || options.length > 10 || options.some((option) => option.length > 2_000)) throw invalid(`questions.${index}`);
+        if (!correct.length) throw invalid(`questions.${index}`, "training.programNeedsCorrect");
+        return { text, options, correct };
+    });
+    return { title, description, passPercent, lessons, questions };
+}
+
+/**
+ * Сохранение программы: новая неизменяемая редакция. Начатые тесты завершаются
+ * по своей редакции, новая применяется со следующей попытки.
+ */
+export async function saveProgram(ctx: Ctx) {
+    const actor = await requireActor(ctx);
+    requireRole(actor, "director");
+    const input = programInput(await readJson(ctx.request));
+    const course = await ensureProgram(ctx.db, actor.companyId, ctx.now);
+    const serialized = JSON.stringify(programContent(input));
+    const checksum = await sha256Hex(`${input.title}\n${input.description}\n${serialized}`);
+    const latest = await latestVersion(ctx.db, course.id);
+    if (!latest || latest.checksum !== checksum) {
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+            try {
+                await ctx.env.DB.prepare(
+                    `INSERT INTO course_versions (id, company_id, course_id, version, title, description, content, checksum, external_ref, source, created_at)
+                     SELECT ?1, ?2, ?3, COALESCE(MAX(version), 0) + 1, ?4, ?5, ?6, ?7, NULL, 'site', ?8 FROM course_versions WHERE course_id = ?3`
+                )
+                    .bind(newId(), actor.companyId, course.id, input.title, input.description || null, serialized, checksum, ctx.now)
+                    .run();
+                break;
+            } catch (error) {
+                if (!isUniqueViolation(error) || attempt === 2) throw error;
+            }
+        }
+        await ctx.db.update(courses).set({ title: input.title }).where(eq(courses.id, course.id));
     }
-    await ctx.db
-        .update(admissionRules)
-        .set({ removedAt: ctx.now })
-        .where(and(eq(admissionRules.companyId, actor.companyId), isNull(admissionRules.removedAt)));
-    for (const rule of parsed) {
-        await ctx.db.insert(admissionRules).values({ id: newId(), companyId: actor.companyId, role: "employee", ...rule, createdBy: actor.userId, createdAt: ctx.now });
-    }
+    // Проходной балл программы — он же условие доступа к рабочему месту.
+    await ctx.db.update(admissionRules).set({ removedAt: ctx.now }).where(and(eq(admissionRules.companyId, actor.companyId), isNull(admissionRules.removedAt)));
+    await ctx.db.insert(admissionRules).values({ id: newId(), companyId: actor.companyId, role: "employee", branchId: null, courseKey: PROGRAM_KEY, minScorePercent: input.passPercent, createdBy: actor.userId, createdAt: ctx.now });
     await markRulesCustomized(ctx.db, actor.companyId, actor.userId, ctx.now);
-    await audit(ctx.db, { companyId: actor.companyId, actorUserId: actor.userId, action: "admission.rules", entityType: "company", entityId: actor.companyId, data: { rules: parsed } }, ctx.now);
-    return { ok: true };
+    await audit(ctx.db, { companyId: actor.companyId, actorUserId: actor.userId, action: "training.program", entityType: "course", entityId: course.id }, ctx.now);
+    return getProgram(ctx);
 }

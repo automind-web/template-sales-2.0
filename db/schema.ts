@@ -175,7 +175,7 @@ export const courseVersions = sqliteTable("course_versions", {
     checksum: text("checksum").notNull(),
     /** Идентификатор редакции во внешней системе: повторная доставка не создаёт новую версию */
     externalRef: text("external_ref"),
-    source: text("source", { enum: ["integration"] }).notNull(),
+    source: text("source", { enum: ["integration", "site"] }).notNull(),
     createdAt: integer("created_at").notNull(),
 }, (t) => [
     uniqueIndex("course_versions_course_version_unique").on(t.courseId, t.version),
@@ -359,79 +359,158 @@ export const kpiVersions = sqliteTable("kpi_versions", {
 ]);
 
 // ---------------------------------------------------------------------------
-// Этап 7. WhatsApp Studio
+// WhatsApp Studio (из шаблона WhatsApp Agent Studio). Имена таблиц и столбцов
+// сохранены как в шаблоне: движок работает с ними напрямую через SQL.
+// Владелец агента (owner_id) — компания; branch_id — филиал, куда попадают лиды.
 // ---------------------------------------------------------------------------
 
-/** Агент филиала — копия базового агента с инструкцией филиала */
-export const waAgents = sqliteTable("wa_agents", {
+export const studioAgents = sqliteTable("agents", {
     id: text("id").primaryKey(),
-    companyId: text("company_id").notNull().references(() => companies.id),
-    branchId: text("branch_id").notNull().references(() => branches.id),
+    ownerId: text("owner_id").notNull(),
+    branchId: text("branch_id"),
     name: text("name").notNull(),
-    instructions: text("instructions").notNull(),
-    createdBy: text("created_by").notNull(),
+    provider: text("provider").notNull().default("openai"),
+    model: text("model").notNull().default("gpt-6-luna"),
+    authMode: text("auth_mode").notNull().default("key"),
+    prompt: text("prompt").notNull().default(""),
+    enabled: integer("enabled").notNull().default(0),
+    delaySeconds: integer("delay_seconds").notNull().default(10),
+    groupsEnabled: integer("groups_enabled").notNull().default(0),
+    responseTokenLimit: integer("response_token_limit").notNull().default(4096),
+    contextChars: integer("context_chars").notNull().default(18000),
+    hourlyLimit: integer("hourly_limit").notNull().default(120),
+    revision: integer("revision").notNull().default(1),
+    kbVersion: integer("kb_version").notNull().default(1),
+    whapiStatus: text("whapi_status").notNull().default("missing"),
+    whapiIdentity: text("whapi_identity"),
+    whapiChannelHash: text("whapi_channel_hash"),
+    whapiCheckedAt: integer("whapi_checked_at"),
     createdAt: integer("created_at").notNull(),
-    updatedBy: text("updated_by"),
     updatedAt: integer("updated_at").notNull(),
-    /** Результат последней проверки в тестовом диалоге */
-    lastTestAt: integer("last_test_at"),
-    lastTestOk: integer("last_test_ok", { mode: "boolean" }),
-    lastTestMode: text("last_test_mode", { enum: ["model", "offline"] }),
-    lastTestError: text("last_test_error"),
-}, (t) => [uniqueIndex("wa_agents_branch_unique").on(t.branchId)]);
+}, (t) => [index("agents_owner").on(t.ownerId), uniqueIndex("channel_single_agent").on(t.whapiChannelHash)]);
 
-/** Разрешённые материалы: агент отвечает только по ним */
-export const waMaterials = sqliteTable("wa_materials", {
+export const studioCredentials = sqliteTable("credentials", {
+    agentId: text("agent_id").notNull().references(() => studioAgents.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    value: text("value").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+}, (t) => [primaryKey({ columns: [t.agentId, t.provider] })]);
+
+export const studioDocuments = sqliteTable("documents", {
     id: text("id").primaryKey(),
-    agentId: text("agent_id").notNull().references(() => waAgents.id),
-    companyId: text("company_id").notNull(),
-    title: text("title").notNull(),
-    body: text("body").notNull(),
-    source: text("source", { enum: ["text", "course"] }).notNull(),
-    sourceRef: text("source_ref"),
-    createdBy: text("created_by").notNull(),
+    agentId: text("agent_id").notNull().references(() => studioAgents.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    content: text("content").notNull(),
+    hash: text("hash").notNull(),
+    kind: text("kind").notNull().default("text"),
     createdAt: integer("created_at").notNull(),
-}, (t) => [index("wa_materials_agent_idx").on(t.agentId)]);
+    updatedAt: integer("updated_at").notNull(),
+}, (t) => [uniqueIndex("document_dedup").on(t.agentId, t.hash)]);
+
+export const studioChunks = sqliteTable("chunks", {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id").notNull().references(() => studioAgents.id, { onDelete: "cascade" }),
+    documentId: text("document_id").notNull().references(() => studioDocuments.id, { onDelete: "cascade" }),
+    ordinal: integer("ordinal").notNull(),
+    content: text("content").notNull(),
+    searchContent: text("search_content").notNull().default(""),
+}, (t) => [index("chunks_agent").on(t.agentId)]);
+
+export const studioConversations = sqliteTable("conversations", {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id").notNull().references(() => studioAgents.id, { onDelete: "cascade" }),
+    chatId: text("chat_id").notNull(),
+    name: text("name").notNull(),
+    isGroup: integer("is_group").notNull().default(0),
+    groupAllowed: integer("group_allowed").notNull().default(0),
+    blocked: integer("blocked").notNull().default(0),
+    handoff: integer("handoff").notNull().default(0),
+    epoch: integer("epoch").notNull().default(1),
+    version: integer("version").notNull().default(0),
+    lastMessageAt: integer("last_message_at").notNull(),
+    snippet: text("snippet").notNull().default(""),
+    reason: text("reason").notNull().default(""),
+    /** Лид CRM, созданный по первому сообщению собеседника */
+    leadId: text("lead_id"),
+}, (t) => [uniqueIndex("conversation_chat").on(t.agentId, t.chatId)]);
+
+export const studioReceipts = sqliteTable("receipts", {
+    agentId: text("agent_id").notNull().references(() => studioAgents.id, { onDelete: "cascade" }),
+    eventId: text("event_id").notNull(),
+    receivedAt: integer("received_at").notNull(),
+}, (t) => [primaryKey({ columns: [t.agentId, t.eventId] })]);
+
+export const studioMessages = sqliteTable("messages", {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id").notNull().references(() => studioAgents.id, { onDelete: "cascade" }),
+    conversationId: text("conversation_id").notNull().references(() => studioConversations.id, { onDelete: "cascade" }),
+    externalId: text("external_id"),
+    role: text("role").notNull(),
+    type: text("type").notNull().default("text"),
+    content: text("content").notNull(),
+    media: text("media"),
+    transcript: text("transcript"),
+    translation: text("translation"),
+    knowledgeVersion: integer("knowledge_version"),
+    epoch: integer("epoch").notNull(),
+    createdAt: integer("created_at").notNull(),
+    sources: text("sources").notNull().default("[]"),
+}, (t) => [uniqueIndex("message_external").on(t.agentId, t.externalId), index("message_conversation").on(t.conversationId, t.createdAt)]);
+
+export const studioJobs = sqliteTable("jobs", {
+    conversationId: text("conversation_id").primaryKey().references(() => studioConversations.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").notNull().references(() => studioAgents.id, { onDelete: "cascade" }),
+    status: text("status").notNull(),
+    dueAt: integer("due_at").notNull(),
+    version: integer("version").notNull(),
+    epoch: integer("epoch").notNull(),
+    leaseToken: text("lease_token"),
+    leaseUntil: integer("lease_until"),
+    attempts: integer("attempts").notNull().default(0),
+    error: text("error"),
+    updatedAt: integer("updated_at").notNull(),
+}, (t) => [index("jobs_due").on(t.status, t.dueAt)]);
+
+export const studioOutbox = sqliteTable("outbox", {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id").notNull().references(() => studioAgents.id, { onDelete: "cascade" }),
+    conversationId: text("conversation_id").notNull().references(() => studioConversations.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    epoch: integer("epoch").notNull(),
+    revision: integer("revision").notNull(),
+    state: text("state").notNull(),
+    body: text("body").notNull(),
+    externalId: text("external_id"),
+    error: text("error"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+}, (t) => [uniqueIndex("outbox_turn").on(t.conversationId, t.epoch, t.version)]);
+
+export const studioUsage = sqliteTable("usage", {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id").notNull().references(() => studioAgents.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    kind: text("kind").notNull(),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    createdAt: integer("created_at").notNull(),
+}, (t) => [index("usage_agent_time").on(t.agentId, t.createdAt)]);
+
+export const studioPromptVersions = sqliteTable("prompt_versions", {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id").notNull().references(() => studioAgents.id, { onDelete: "cascade" }),
+    content: text("content").notNull(),
+    createdAt: integer("created_at").notNull(),
+});
 
 /**
- * Рабочий номер филиала через Whapi. Секрет webhook хранится только как хэш,
- * сам секрет есть лишь в адресе, который сохранён в настройках Whapi.
+ * Ключ шифрования сохранённых ключей подключений. Если владелец не задал
+ * секрет MASTER_KEY, ключ создаётся автоматически при первом сохранении
+ * и хранится только на сервере (в браузер не передаётся).
  */
-export const waChannels = sqliteTable("wa_channels", {
+export const vaultKeys = sqliteTable("vault_keys", {
     id: text("id").primaryKey(),
-    companyId: text("company_id").notNull().references(() => companies.id),
-    branchId: text("branch_id").notNull().references(() => branches.id),
-    phone: text("phone"),
-    webhookTokenHash: text("webhook_token_hash").notNull(),
-    status: text("status", { enum: ["connected", "disconnected"] }).notNull(),
-    connectedBy: text("connected_by"),
-    connectedAt: integer("connected_at"),
-    lastCheckAt: integer("last_check_at"),
-    lastCheckState: text("last_check_state"),
-    lastCheckDetail: text("last_check_detail"),
-    lastInboundAt: integer("last_inbound_at"),
-}, (t) => [
-    uniqueIndex("wa_channels_branch_unique").on(t.branchId),
-    uniqueIndex("wa_channels_token_unique").on(t.webhookTokenHash),
-]);
-
-/** Журнал сообщений канала; повторная доставка входящего не создаёт дубль */
-export const waMessages = sqliteTable("wa_messages", {
-    id: text("id").primaryKey(),
-    companyId: text("company_id").notNull(),
-    branchId: text("branch_id").notNull(),
-    chatId: text("chat_id").notNull(),
-    direction: text("direction", { enum: ["in", "out"] }).notNull(),
-    text: text("text").notNull(),
-    externalId: text("external_id"),
-    status: text("status", { enum: ["received", "pending", "sent", "failed"] }).notNull(),
-    error: text("error"),
-    attempts: integer("attempts").notNull().default(0),
-    leadId: text("lead_id"),
-    replyToId: text("reply_to_id"),
+    value: text("value").notNull(),
     createdAt: integer("created_at").notNull(),
-}, (t) => [
-    uniqueIndex("wa_messages_external_unique").on(t.externalId),
-    index("wa_messages_branch_idx").on(t.branchId, t.createdAt),
-    index("wa_messages_status_idx").on(t.status, t.createdAt),
-]);
+});

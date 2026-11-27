@@ -6,7 +6,7 @@ import { requireActor, requireRole, type Actor } from "../auth.ts";
 import type { Ctx } from "../context.ts";
 import { AppError, readJson } from "../http.ts";
 import { writeSetting } from "../settings-store.ts";
-import { assistantModel, employeesSeeBranch, FUNNEL_KEY, getFunnel, MODEL_KEY, SEE_BRANCH_KEY, stageOf, validateFunnel } from "../crm/funnel.ts";
+import { employeesSeeBranch, FUNNEL_KEY, getFunnel, SEE_BRANCH_KEY, stageOf, validateFunnel } from "../crm/funnel.ts";
 import { assignableOwners, createLead, crmBranch, leadHistory, listLeads, loadLead, parseFilters, toViews, updateLead } from "../crm/leads.ts";
 
 async function companyTimezone(ctx: Ctx, actor: Actor): Promise<string> {
@@ -119,8 +119,6 @@ export async function getProcess(ctx: Ctx) {
     return {
         funnel: await getFunnel(ctx.db, actor.companyId),
         employeesSeeBranch: await employeesSeeBranch(ctx.db, actor.companyId),
-        model: await assistantModel(ctx.db, actor.companyId),
-        models: companyConfig.whatsappAgent.models,
     };
 }
 
@@ -143,11 +141,6 @@ export async function saveProcess(ctx: Ctx) {
     }
     if ("employeesSeeBranch" in body) {
         await writeSetting(ctx.db, actor.companyId, SEE_BRANCH_KEY, body["employeesSeeBranch"] === true, actor.userId, ctx.now);
-    }
-    if ("model" in body) {
-        const model = String(body["model"]);
-        if (!companyConfig.whatsappAgent.models.includes(model)) throw new AppError(400, "validation.invalidInput", { fields: { model: "validation.invalidInput" } });
-        await writeSetting(ctx.db, actor.companyId, MODEL_KEY, model, actor.userId, ctx.now);
     }
     await audit(ctx.db, { companyId: actor.companyId, actorUserId: actor.userId, action: "settings.process", entityType: "company", entityId: actor.companyId }, ctx.now);
     return getProcess(ctx);

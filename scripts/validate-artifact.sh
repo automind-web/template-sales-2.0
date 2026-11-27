@@ -16,6 +16,8 @@ required_migrations=(
   "0002_crm.sql"
   "0003_kpi.sql"
   "0004_whatsapp.sql"
+  "0005_whatsapp_studio.sql"
+  "0006_remove_old_whatsapp.sql"
   "meta/_journal.json"
 )
 

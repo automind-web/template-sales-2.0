@@ -4,13 +4,13 @@ import { AsyncLocalStorage } from "node:async_hooks";
 export type Env = {
     DB: D1Database;
     BUCKET?: R2Bucket;
-    WHAPI_TOKEN?: string;
-    OPENAI_API_KEY?: string;
+    /** Необязательно: свой ключ шифрования ключей подключений (32 байта, base64) */
+    MASTER_KEY?: string;
     INTEGRATION_TOKEN?: string;
     OWNER_ACTIVATION_CODE?: string;
 };
 
-export type SecretName = "WHAPI_TOKEN" | "OPENAI_API_KEY" | "INTEGRATION_TOKEN" | "OWNER_ACTIVATION_CODE";
+export type SecretName = "INTEGRATION_TOKEN" | "OWNER_ACTIVATION_CODE";
 
 /** Продление работы после ответа (ctx.waitUntil Worker'а) */
 export type WaitUntil = (promise: Promise<unknown>) => void;

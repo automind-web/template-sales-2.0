@@ -20,8 +20,10 @@ export function canUseSection(actor: Actor, section: Section): boolean {
         case "kpi":
             // Сотрудник — только после допуска; руководитель и директор — всегда.
             return actor.admitted;
-        case "stats":
         case "whatsapp":
+            // Ключи подключений вводятся в студии — только директор.
+            return actor.role === "director";
+        case "stats":
         case "settings":
             // Руководитель видит в настройках только участников и приглашения своего филиала.
             return actor.role === "director" || actor.role === "manager";

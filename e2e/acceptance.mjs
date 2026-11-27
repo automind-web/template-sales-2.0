@@ -34,10 +34,10 @@ async function register(p, url, name, login, password) {
   await p.getByRole("button", { name: "Зарегистрироваться" }).click();
 }
 
-// 1. Владелец сайта: секрет OWNER_ACTIVATION_CODE → ссылка активации директора
+// 1. Владелец сайта: код владельца (OWNER_ACTIVATION_CODE) → ссылка активации директора
 const owner = await ctx();
 await owner.p.goto(BASE + "/owner");
-await owner.p.getByLabel("Секрет владельца").fill(vars.OWNER_ACTIVATION_CODE);
+await owner.p.getByLabel("Код владельца").fill(vars.OWNER_ACTIVATION_CODE);
 await owner.p.getByLabel("Название компании").fill("Пекарни «Колос»");
 await owner.p.keyboard.press("Control+Enter");
 const activationUrl = await owner.p.locator("input[readonly]").inputValue();
@@ -46,11 +46,14 @@ assert(activationUrl.includes("/activate/"), "владелец выпустил 
 // 2. Директор: регистрация, филиал, приглашение руководителя
 const dir = await ctx();
 await register(dir.p, activationUrl, "Анна Директорова", "director", "director-pass-1");
+await dir.p.waitForURL(BASE + "/"); await hydrated(dir.p);
+await dir.p.getByText("Первые шаги").waitFor();
+await dir.p.getByRole("link", { name: /Создайте филиал/ }).click();
 await dir.p.waitForURL("**/settings?tab=branches"); await hydrated(dir.p);
-await dir.p.getByRole("button", { name: "Создать филиал" }).click();
+await dir.p.getByRole("button", { name: /Новый филиал/ }).click();
 await dir.p.getByRole("dialog").getByLabel("Название").fill("Центральная пекарня");
 await dir.p.getByRole("dialog").getByRole("button", { name: /Создать/ }).click();
-await dir.p.locator('input[value="Центральная пекарня"]').waitFor();
+await dir.p.locator("main").getByText("Центральная пекарня", { exact: true }).waitFor();
 log("ok: директор активирован и создал филиал");
 await dir.p.getByRole("tab", { name: "Приглашения" }).click();
 await dir.p.getByLabel("Роль").selectOption("manager");
@@ -62,7 +65,7 @@ assert(managerUrl.includes("/invite/"), "директор пригласил р�
 // 3. Руководитель: регистрация, приглашение сотрудника
 const mgr = await ctx();
 await register(mgr.p, managerUrl, "Мария Руководитель", "manager", "manager-pass-1");
-await mgr.p.waitForURL("**/training"); await hydrated(mgr.p);
+await mgr.p.waitForURL(BASE + "/"); await hydrated(mgr.p);
 await mgr.p.getByRole("link", { name: "Настройки системы" }).click();
 await mgr.p.getByRole("tab", { name: "Приглашения" }).click();
 await mgr.p.getByLabel("Кому (подсказка имени)").fill("Иван Пекарев");
@@ -70,68 +73,61 @@ await mgr.p.keyboard.press("Control+Enter");
 const employeeUrl = await mgr.p.locator("input[readonly]").inputValue();
 assert(employeeUrl.includes("/invite/"), "руководитель пригласил сотрудника");
 
-// 4. Курс приходит из внешней системы (интеграция, INTEGRATION_TOKEN)
-const course = await fetch(BASE + "/api/integration/training/courses/sales-basics/versions", {
-  method: "POST",
-  headers: { authorization: `Bearer ${vars.INTEGRATION_TOKEN}`, "content-type": "application/json" },
-  body: JSON.stringify({
-    approved: true, title: "Основы продаж", externalRef: "rev-1", description: "Обязательный курс для работы в CRM.",
-    lessons: [{ key: "intro", title: "Наш клиент", body: "Клиенты — кафе и магазины.\n\n- звонок в течение часа\n- запись в CRM" }],
-    test: { passPercent: 80, questions: [1, 2, 3].map((n) => ({ key: `q${n}`, text: `Вопрос ${n}: выберите вариант A`, kind: "single", options: [{ key: "a", text: "Вариант A" }, { key: "b", text: "Вариант B" }], correct: ["a"] })) },
-  }),
-});
-assert(course.status === 200, "курс опубликован интеграцией");
-
-// 5. Сотрудник на телефоне: регистрация, обучение, тест, допуск
+// 4. Сотрудник на телефоне: до теста открыто только обучение; уроки, тест — рабочее место открывается
 const emp = await ctx({ ...devices["iPhone 13"] });
 await register(emp.p, employeeUrl, "Иван Пекарев", "ivan", "employee-pass-1");
 await emp.p.waitForURL("**/training"); await hydrated(emp.p);
-await emp.p.getByText("Нужен для допуска к CRM").waitFor();
-assert((await (await emp.c.request.get(BASE + "/api/crm/leads")).status()) === 403, "до допуска CRM закрыт на сервере");
-await emp.p.getByRole("link", { name: "Открыть курс" }).click();
-await emp.p.getByRole("button", { name: "Урок пройден" }).first().click();
-await emp.p.getByRole("link", { name: "Начать тест" }).click();
-await emp.p.getByText("Вопрос 1: выберите вариант A").waitFor();
+await emp.p.getByText("Откроется после теста").waitFor();
+assert((await (await emp.c.request.get(BASE + "/api/crm/leads")).status()) === 403, "до теста рабочее место закрыто на сервере");
+await emp.p.getByRole("link", { name: "Открыть уроки" }).click();
+for (let i = 0; i < 3; i++) {
+  await emp.p.getByRole("button", { name: "Урок пройден" }).first().click();
+  await emp.p.getByText(`Уроки: ${i + 1} из 3`).waitFor();
+}
+await emp.p.goto(BASE + "/training");
+await emp.p.getByRole("link", { name: "Пройти тест" }).click();
+await emp.p.getByText("Где фиксируется вся работа с клиентом?").waitFor();
 const sets = emp.p.locator("fieldset");
-for (let i = 0; i < 3; i++) await sets.nth(i).getByLabel("Вариант A").check();
-await emp.p.getByText("Отвечено: 3 из 3").waitFor();
+const answers = ["В карточке заявки в CRM", "В течение 15 минут", "Назначить следующий контакт", "Причину отказа", "Только согласованные в компании условия"];
+for (let i = 0; i < answers.length; i++) await sets.nth(i).getByLabel(answers[i]).check();
+await emp.p.getByText("Отвечено: 5 из 5").waitFor();
 await emp.p.getByRole("button", { name: "Завершить тест" }).click();
-await emp.p.getByText("Допуск к CRM получен").waitFor();
+await emp.p.getByText("Обучение пройдено. Рабочее место открыто.").waitFor();
 await emp.p.screenshot({ path: SHOTS + "/acc-1-admitted-phone.png" });
-log("ok: сотрудник прошёл обучение и получил допуск автоматически");
+log("ok: сотрудник прошёл стартовое обучение и тест — рабочее место открылось само");
 
-// 6. Сотрудник на телефоне: лид и смена этапа
+// 5. Сотрудник на телефоне: заявка и смена этапа
 await emp.p.goto(BASE + "/crm");
-await emp.p.getByText("Лидов пока нет").waitFor();
-await emp.p.getByRole("button", { name: "Новый лид" }).first().click();
+await emp.p.getByText("Заявок пока нет").waitFor();
+await emp.p.getByRole("button", { name: "Новая заявка" }).first().click();
 const create = emp.p.getByRole("dialog");
 await create.getByLabel("Клиент", { exact: true }).fill("Кофейня «Утро»");
 await create.getByLabel(/Телефон/).fill("+7 701 555 44 33");
 await create.getByRole("button", { name: /Создать/ }).click();
 await create.waitFor({ state: "detached" });
 await emp.p.getByText("Кофейня «Утро»").first().waitFor();
-log("ok: сотрудник создал лид с телефона");
+log("ok: сотрудник создал заявку с телефона");
 await emp.p.goto(BASE + "/crm?view=kanban");
-await emp.p.getByRole("button", { name: /Действия с лидом/ }).first().click();
+await emp.p.getByRole("button", { name: /Действия с заявкой/ }).first().click();
 await emp.p.getByRole("menuitem", { name: /→ Контакт/ }).click();
 const stage = emp.p.getByRole("dialog");
 await stage.getByText("Переход в этап «Контакт»").waitFor();
 await stage.getByLabel("Дата контакта").fill("2030-01-15");
 await stage.getByLabel(/Комментарий/).fill("Позвонил, ждут меню на неделю");
 await stage.getByRole("button", { name: /Перенести|Сохранить/ }).click();
-await emp.p.getByText(/перенесён в «Контакт»/).waitFor();
+await emp.p.getByText(/перенесена в «Контакт»/).waitFor();
 assert(await noHorizontalScroll(emp.p), "CRM на телефоне без горизонтальной прокрутки");
 await emp.p.screenshot({ path: SHOTS + "/acc-2-kanban-phone.png" });
-log("ok: сотрудник перевёл лид в «Контакт»");
+log("ok: сотрудник перевёл заявку в «Контакт»");
 
-// 7. Руководитель на ПК: изменение видно в отчёте, переход к исходной сделке
+// 6. Руководитель на ПК: изменение видно в отчёте, переход к исходной сделке
 await mgr.p.goto(BASE + "/stats");
 const ivanRow = mgr.p.locator("tr", { hasText: "Иван Пекарев" });
 await ivanRow.waitFor();
 const created = ivanRow.locator("td").nth(1);
-assert((await created.textContent()).trim() === "1", "в отчёте руководителя у Ивана 1 новый лид");
+assert((await created.textContent()).trim() === "1", "в отчёте руководителя у Ивана 1 новая заявка");
 const open = ivanRow.locator("td").nth(7);
-assert((await open.textContent()).trim() === "1", "и 1 лид в работе");
+assert((await open.textContent()).trim() === "1", "и 1 заявка в работе");
 await mgr.p.screenshot({ path: SHOTS + "/acc-3-stats.png" });
 await created.getByRole("link").click();
 await mgr.p.getByText("Кофейня «Утро»").waitFor();
@@ -143,7 +139,7 @@ assert(await mgr.p.getByText(/Новый → Контакт|«Новый» → �
 await mgr.p.screenshot({ path: SHOTS + "/acc-4-lead.png", fullPage: true });
 log("ok: руководитель открыл исходную сделку из отчёта");
 
-// 8. Директор на телефоне: та же цифра в статистике компании
+// 7. Директор на телефоне: та же цифра в статистике компании
 const dirPhone = await ctx({ ...devices["iPhone 13"] });
 await dirPhone.c.request.post(BASE + "/api/auth/login", { headers: { "x-asc-request": "1" }, data: { login: "director", password: "director-pass-1" } });
 await dirPhone.p.goto(BASE + "/stats");
@@ -152,7 +148,7 @@ assert((await dirPhone.p.locator("tr", { hasText: "Иван Пекарев" }).l
 assert(await noHorizontalScroll(dirPhone.p), "статистика на телефоне без горизонтальной прокрутки страницы");
 await dirPhone.p.screenshot({ path: SHOTS + "/acc-5-stats-phone.png" });
 
-// 9. Изоляция: руководитель другого филиала не видит лид
+// 8. Изоляция: руководитель другого филиала не видит заявку
 await (await dir.c.request.post(BASE + "/api/branches", { headers: { "x-asc-request": "1" }, data: { name: "Пекарня на Сейфуллина" } })).json();
 const branches = (await (await dir.c.request.get(BASE + "/api/branches")).json()).branches;
 const other = branches.find((b) => b.name === "Пекарня на Сейфуллина");
@@ -160,9 +156,9 @@ const inv = await (await dir.c.request.post(BASE + "/api/invitations", { headers
 const stranger = await ctx();
 await stranger.c.request.post(BASE + `/api/invitations/by-token/${inv.path.split("/").pop()}/accept`, { headers: { "x-asc-request": "1" }, data: { displayName: "Пётр Чужой", login: "petr", password: "manager-pass-2" } });
 const leadId = new URL(mgr.p.url()).pathname.split("/").pop();
-assert((await (await stranger.c.request.get(BASE + `/api/crm/leads/${leadId}`)).status()) === 404, "лид чужого филиала не открывается (404)");
+assert((await (await stranger.c.request.get(BASE + `/api/crm/leads/${leadId}`)).status()) === 404, "заявка чужого филиала не открывается (404)");
 const theirs = await (await stranger.c.request.get(BASE + "/api/crm/leads")).json();
-assert(theirs.leads.length === 0, "в своём филиале у чужого руководителя лидов нет");
+assert(theirs.leads.length === 0, "в своём филиале у чужого руководителя заявок нет");
 const theirStats = await (await stranger.c.request.get(BASE + "/api/stats")).json();
 assert(!theirStats.employees.some((e) => e.name === "Иван Пекарев"), "в чужой статистике сотрудника нет");
 

@@ -255,7 +255,7 @@ test("восстановление пароля по коду от руково�
 });
 
 test("настройки системы: срок приглашений, своё имя, подключения без раскрытия секретов", async () => {
-    const env = createTestEnv({ WHAPI_TOKEN: "whapi-secret-value" });
+    const env = createTestEnv();
     const owner = new TestClient(env, "10.9.9.9");
     const tooLong = await owner.post("/api/owner/activation-links", { code: OWNER_CODE, ttlHours: 500 });
     assert.equal(tooLong.status, 400);
@@ -274,13 +274,8 @@ test("настройки системы: срок приглашений, сво
     assert.equal(me.body.user.displayName, "Айгерим Новая");
     assert.equal(me.body.sections["settings"], true);
 
-    const connections = await director.get<Record<string, boolean>>("/api/company/connections");
-    assert.deepEqual(connections.body, { integration: true, storage: true, whapi: true, model: false, ownerCode: true });
-    assert.ok(!JSON.stringify(connections.body).includes("whapi-secret-value"), "значение секрета не уходит в браузер");
-
     const manager = await invite(env, director, { role: "manager", branchId: branch.body.branch.id }, "center.manager");
     const employee = await invite(env, manager, { role: "employee" }, "center.employee");
-    assert.equal((await manager.get("/api/company/connections")).status, 403);
     assert.equal((await manager.get("/api/sections/settings")).status, 200, "руководителю доступны участники и приглашения");
     assert.equal((await manager.patch("/api/company", { name: "Взлом", timezone: "UTC" })).status, 403);
     assert.equal((await employee.get("/api/sections/settings")).status, 403);

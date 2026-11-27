@@ -40,7 +40,7 @@ log("ok: компания, филиал, руководитель и два до
 
 const mgr = people.manager;
 await mgr.p.goto(BASE + "/crm");
-await mgr.p.getByText("Лидов пока нет").waitFor();
+await mgr.p.getByText("Заявок пока нет").waitFor();
 log("ok: пустое состояние CRM");
 
 // Создание лидов через диалог (Ctrl+Enter)
@@ -50,7 +50,7 @@ const leadsToCreate = [
   ["Магазин «Ромашка»", "", "Иван Пекарев", ""],
 ];
 for (const [client, phone, owner, amount] of leadsToCreate) {
-  await mgr.p.getByRole("button", { name: "Новый лид" }).first().click();
+  await mgr.p.getByRole("button", { name: "Новая заявка" }).first().click();
   const d = mgr.p.getByRole("dialog");
   await d.getByLabel("Клиент", { exact: true }).fill(client);
   if (phone) await d.getByLabel(/Телефон/).fill(phone);
@@ -76,7 +76,7 @@ await mgr.p.getByLabel("Ответственный").selectOption({ label: "Ив
 await mgr.p.getByText("Найдено: 2").waitFor();
 const listNames = (await mgr.p.locator("tbody tr").allTextContents()).map((s) => s.includes("Утро") ? "Утро" : s.includes("Ромашка") ? "Ромашка" : s).sort();
 // Тот же фильтр на канбане
-await mgr.p.getByRole("button", { name: "Канбан" }).click();
+await mgr.p.getByRole("button", { name: "Доска" }).click();
 await mgr.p.waitForURL(/view=kanban/);
 assert((await mgr.p.url()).includes("owner="), "фильтр сохранился при переключении вида");
 const boardNames = (await mgr.p.locator("li[data-lead] h3").allTextContents()).map((s) => s.includes("Утро") ? "Утро" : "Ромашка").sort();
@@ -111,7 +111,7 @@ await card("Ромашка").dragTo(column("Отказ"));
 const lostDialog = mgr.p.getByRole("dialog");
 await lostDialog.getByLabel("Причина отказа").fill("Нет бюджета");
 await mgr.p.keyboard.press("Control+Enter");
-await mgr.p.getByText("Лид уже изменил другой пользователь").waitFor();
+await mgr.p.getByText("Заявку уже изменил другой пользователь").waitFor();
 await column("Новый").locator("li[data-lead]", { hasText: "Ромашка" }).waitFor();
 log("ok: отказ сервера (конфликт версий) — карточка на прежнем месте, причина показана");
 await card("Ромашка").dragTo(column("Отказ"));
@@ -138,7 +138,7 @@ const before = (await api(dir.c, "GET", `/api/crm/leads/${currentId}`)).lead;
 await api(dir.c, "PATCH", `/api/crm/leads/${currentId}`, { opId: "dirop2" + Date.now(), version: before.version, changes: { clientCompany: "ТОО Директор" } });
 await mgr.p.getByLabel("Компания клиента").fill("ТОО Менеджер");
 await mgr.p.getByLabel("Компания клиента").press("Control+Enter");
-await mgr.p.getByText("Лид уже изменили").waitFor();
+await mgr.p.getByText("Заявку уже изменили").waitFor();
 assert((await mgr.p.getByLabel("Компания клиента").inputValue()) === "ТОО Менеджер", "при конфликте введённый текст сохранён");
 await mgr.p.getByRole("button", { name: /^Сохранить/ }).click();
 await mgr.p.getByText("Сохранено.").waitFor();
@@ -147,7 +147,7 @@ await mgr.p.getByRole("textbox", { name: "Написать комментари�
 await mgr.p.getByRole("button", { name: /Отправить/ }).click();
 await mgr.p.locator("li", { hasText: "Клиент просил КП" }).first().waitFor();
 assert(await mgr.p.getByText(/Компания клиента: — → ТОО Директор/).isVisible(), "история: автор и прежнее значение");
-await mgr.p.getByRole("button", { name: "← К списку лидов" }).click();
+await mgr.p.getByRole("button", { name: "← К списку заявок" }).click();
 await mgr.p.waitForURL(/stage=new/);
 assert(mgr.p.url().includes("stage=new"), "после возврата фильтр этапа сохранился");
 
@@ -157,10 +157,10 @@ await ivan.p.goto(BASE + "/crm?view=kanban");
 await ivan.p.locator("li[data-lead]").first().waitFor();
 const mine = await ivan.p.locator("li[data-lead] h3").allTextContents();
 assert(mine.length === 2 && !mine.some((n) => n.includes("Самал")), "сотрудник видит только свои лиды: " + mine);
-await ivan.p.getByRole("button", { name: /Действия с лидом/ }).first().click();
+await ivan.p.getByRole("button", { name: /Действия с заявкой/ }).first().click();
 await ivan.p.getByRole("menuitem", { name: /→ Встреча/ }).click();
 // Дата контакта уже есть — обязательных полей не требуется, перенос сразу
-await ivan.p.getByText(/перенесён в «Встреча»/).waitFor();
+await ivan.p.getByText(/перенесена в «Встреча»/).waitFor();
 log("ok: перенос через меню карточки на телефоне");
 await ivan.p.screenshot({ path: SHOTS + "/s3-mobile-kanban.png" });
 assert(!(await ivan.p.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)), "нет горизонтальной прокрутки страницы на телефоне (колонки прокручиваются внутри)");

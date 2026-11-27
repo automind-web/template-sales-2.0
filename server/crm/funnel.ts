@@ -8,7 +8,6 @@ export type RequiredField = (typeof REQUIRED_FIELDS)[number];
 
 export const FUNNEL_KEY = "crm.funnel";
 export const SEE_BRANCH_KEY = "crm.employeesSeeBranch";
-export const MODEL_KEY = "wa.model";
 
 /** Воронка компании: сохранённая директором или из config/company.ts */
 export async function getFunnel(db: Db, companyId: string): Promise<FunnelConfig> {
@@ -25,11 +24,6 @@ export async function getFunnel(db: Db, companyId: string): Promise<FunnelConfig
 
 export async function employeesSeeBranch(db: Db, companyId: string): Promise<boolean> {
     return (await readSetting<boolean>(db, companyId, SEE_BRANCH_KEY)) ?? companyConfig.employeesSeeBranchLeads;
-}
-
-export async function assistantModel(db: Db, companyId: string): Promise<string> {
-    const stored = await readSetting<string>(db, companyId, MODEL_KEY);
-    return stored && companyConfig.whatsappAgent.models.includes(stored) ? stored : companyConfig.whatsappAgent.model;
 }
 
 const KEY = /^[a-z][a-z0-9_]{0,31}$/;
