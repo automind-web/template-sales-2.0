@@ -9,7 +9,7 @@
 import { useSyncExternalStore } from "react";
 import type { MessageKey } from "../i18n/index.ts";
 
-export type HotkeyId = "focusSearch" | "openSelected" | "submitForm" | "closeDialog";
+export type HotkeyId = "focusSearch" | "openSelected" | "submitForm" | "closeDialog" | "toggleNav";
 
 type Hotkey = {
     id: HotkeyId;
@@ -50,6 +50,13 @@ export const HOTKEYS: Record<HotkeyId, Hotkey> = {
         keys: { other: "Esc", mac: "Esc" },
         scope: "Верхний диалог; фокус возвращается на вызвавший элемент",
         match: (event) => event.key === "Escape",
+    },
+    toggleNav: {
+        id: "toggleNav",
+        labelKey: "hotkey.toggleNav",
+        keys: { other: "Ctrl+B", mac: "⌘+B" },
+        scope: "Рабочая область на ПК, вне поля ввода",
+        match: (event, mac) => (event.key === "b" || event.key === "B" || event.code === "KeyB") && !event.altKey && !event.shiftKey && (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey),
     },
 };
 

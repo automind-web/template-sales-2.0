@@ -128,7 +128,7 @@ npm run build                     # typecheck + vinext build + проверка 
 npm run test:artifact             # собранный Worker в Miniflare: миграции с нуля, вход, cookie
 ```
 
-Браузерные сценарии (ПК и iPhone): `npm run dev` на чистой БД, затем один из `node e2e/stage1.mjs`, `stage2.mjs`, `stage3.mjs`, `stage5.mjs`, `stage7.mjs`, `stage8.mjs` (доступы и KPI) или полный путь приёмки `node e2e/acceptance.mjs` (нужен playwright с Chromium; перед каждым сценарием — чистая БД: удалите `.wrangler/state`). Локальные секреты для `npm run dev` берутся из `.dev.vars` (см. `.env.example`). Локальная D1 в `.wrangler/state`. В режиме разработки миграции применяются автоматически, в рабочей сборке это делает Sites.
+Браузерные сценарии (ПК и iPhone): `npm run dev` на чистой БД, затем один из `node e2e/stage1.mjs`, `stage2.mjs`, `stage3.mjs`, `stage5.mjs`, `stage7.mjs`, `stage8.mjs` (доступы и KPI), `stage9.mjs` (сворачиваемое меню и нижняя панель на телефоне) или полный путь приёмки `node e2e/acceptance.mjs` (нужен playwright с Chromium; перед каждым сценарием — чистая БД: удалите `.wrangler/state`). Локальные секреты для `npm run dev` берутся из `.dev.vars` (см. `.env.example`). Локальная D1 в `.wrangler/state`. В режиме разработки миграции применяются автоматически, в рабочей сборке это делает Sites.
 
 ## 10. Значения по умолчанию
 
@@ -185,7 +185,7 @@ npm run test:artifact             # собранный Worker в Miniflare: ми
 | Версия схемы | `0007_access_and_kpi` (8 миграций, контрольные суммы в `db/migration-lock.json`) |
 | Активация директора | Код владельца `OWNER_ACTIVATION_CODE` → страница `/owner` → одноразовая ссылка `/activate/…` → главная с «Первыми шагами». Повторная активация после регистрации директора запрещена |
 | Серверные сценарии | `npm test`: 36 из 36 (доступ и изоляция, однократная активация, рабочие роли, перевыпуск приглашений, журнал прав, KPI сотрудника, дата начала, копирование, предпросмотр, прогноз, обучение и отметка «Прошёл обучение», CRM и конфликты, KPI = статистика, WhatsApp Studio: доступ директора, шифрование ключей, заявки из WhatsApp, очередь ответов на поддельных Whapi и ChatGPT) |
-| Браузерные сценарии | `e2e/acceptance.mjs`, `stage1/2/3/5/7/8.mjs` на ПК и iPhone 13: пройдены, ошибок в консоли нет |
+| Браузерные сценарии | `e2e/acceptance.mjs`, `stage1/2/3/5/7/8/9.mjs` на ПК и iPhone 13: пройдены, ошибок в консоли нет |
 | Проверка артефакта | `npm run build` и `npm run test:artifact` (собранный Worker в Miniflare, миграции с нуля, WhatsApp Studio) |
 | WhatsApp | Сборка готова. **Реальный обмен сообщениями через подключённый номер не подтверждён**: в среде разработки нет ключей Whapi/ChatGPT и выхода к ним в сеть |
 

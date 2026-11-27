@@ -15,8 +15,11 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
     width: "device-width",
     initialScale: 1,
+    viewportFit: "cover",
     themeColor: companyConfig.palette.primary,
 };
+
+const NAV_SCRIPT = `try{if(localStorage.getItem("asc-nav")==="collapsed")document.documentElement.dataset.nav="collapsed"}catch(e){}`;
 
 function themeStyle(): CSSProperties {
     const { palette, fonts } = companyConfig;
@@ -43,7 +46,11 @@ function themeStyle(): CSSProperties {
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
     return (
-        <html lang={companyConfig.locale} data-density={companyConfig.density} style={themeStyle()}>
+        <html lang={companyConfig.locale} data-density={companyConfig.density} style={themeStyle()} suppressHydrationWarning>
+            <head>
+                {/* Свёрнутое меню восстанавливается до первой отрисовки, без мигания */}
+                <script dangerouslySetInnerHTML={{ __html: NAV_SCRIPT }} />
+            </head>
             <body className="antialiased">
                 <HydrationMark />
                 {children}

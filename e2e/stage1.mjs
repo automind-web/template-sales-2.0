@@ -119,10 +119,11 @@ await register(emp.p, employeeUrl, "Константин Длиннофамил�
 await emp.p.waitForURL("**/training"); await hydrated(emp.p);
 await emp.p.getByText("Откроется после теста").waitFor();
 await emp.p.screenshot({ path: SHOTS + "/s1-employee-mobile.png" });
-await emp.p.getByRole("button", { name: "Меню" }).click();
-const navLinks = (await emp.p.locator("#mobile-nav nav ul").first().locator("li").allTextContents()).map((text) => text.replace("Откроется после обучения", "").trim());
-assert(JSON.stringify(navLinks) === JSON.stringify(["Обучение", "CRM", "KPI"]), "до теста открыто только обучение, CRM и KPI видны закрытыми: " + navLinks);
-assert((await emp.p.locator("#mobile-nav nav a", { hasText: "CRM" }).count()) === 0, "CRM в меню без ссылки");
+const tabs1 = (await emp.p.locator("#tab-bar > div > *").allTextContents()).map((text) => text.replace("Откроется после обучения", "").trim());
+assert(JSON.stringify(tabs1) === JSON.stringify(["Обучение", "CRM", "KPI", "Профиль"]), "нижняя панель до теста: обучение, CRM и KPI закрыты, профиль: " + tabs1);
+assert((await emp.p.locator("#tab-bar a", { hasText: "CRM" }).count()) === 0, "CRM в меню без ссылки");
+assert(await emp.p.locator("#tab-bar").isVisible(), "нижняя панель видна на телефоне");
+assert(!(await emp.p.locator("aside").isVisible()), "боковое меню на телефоне скрыто");
 await emp.p.screenshot({ path: SHOTS + "/s1-employee-mobile-menu.png" });
 await emp.p.goto(BASE + "/crm");
 await emp.p.getByText("Раздел откроется после обучения или недоступен для вашей роли.").waitFor();

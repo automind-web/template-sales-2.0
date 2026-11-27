@@ -18,7 +18,7 @@ export function useToast() {
         if (timer.current) clearTimeout(timer.current);
     }, []);
     const view = (
-        <div aria-live="polite" role="status" className="pointer-events-none fixed inset-x-0 bottom-4 z-50 flex justify-center px-4">
+        <div aria-live="polite" role="status" className="pointer-events-none fixed inset-x-0 bottom-[calc(var(--tabbar-h)+12px)] z-50 md:bottom-4 flex justify-center px-4">
             {toast ? (
                 <div className={cn("pointer-events-auto max-w-xl rounded-xl px-4 py-3 text-sm font-semibold shadow-xl break-anywhere", toast.kind === "error" ? "bg-danger text-danger-foreground" : "bg-foreground text-background")}>{toast.text}</div>
             ) : null}

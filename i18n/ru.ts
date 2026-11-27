@@ -41,6 +41,7 @@ export const ru = {
     "hotkey.openSelected": "Открыть выбранную карточку",
     "hotkey.submitForm": "Сохранить форму",
     "hotkey.closeDialog": "Закрыть диалог",
+    "hotkey.toggleNav": "Свернуть или развернуть меню",
 
     // Роли
     "role.director": "Директор",
@@ -101,6 +102,13 @@ export const ru = {
     "nav.profile": "Профиль",
     "nav.logout": "Выйти",
     "nav.menu": "Меню",
+    "nav.collapse": "Свернуть меню",
+    "nav.expand": "Развернуть меню",
+    "nav.more": "Ещё",
+    "nav.moreTitle": "Все разделы",
+    "nav.short.whatsapp": "WhatsApp",
+    "nav.short.settings": "Настройки",
+    "nav.short.stats": "Статистика",
     "nav.branchSelect": "Филиал",
     "nav.skipToContent": "Перейти к содержимому",
 
