@@ -131,6 +131,7 @@ function NewInvitation({ onCreated }: { onCreated: () => void }) {
 function InvitationRow({ invitation, onChanged }: { invitation: Invitation; onChanged: () => void }) {
     const { me } = useSession();
     const action = useAction();
+    const [reissued, setReissued] = useState<{ url: string; expiresAt: number } | null>(null);
     const statusLine = (() => {
         switch (invitation.status) {
             case "active":
@@ -152,12 +153,37 @@ function InvitationRow({ invitation, onChanged }: { invitation: Invitation; onCh
                 </div>
                 <div className="mt-0.5 text-[13px] text-muted-foreground">{statusLine}</div>
                 {action.error ? <p className="mt-1 text-[13px] text-danger">{action.error}</p> : null}
+                {reissued ? (
+                    <div className="mt-2 grid gap-1.5">
+                        <FormMessage kind="success">{t("team.inviteReissued", { date: formatDateTime(reissued.expiresAt, me.company.timezone) })}</FormMessage>
+                        <CopyLink url={reissued.url} />
+                    </div>
+                ) : null}
             </div>
-            {invitation.status === "active" ? (
-                <Button variant="danger" size="sm" disabled={action.busy} onClick={() => void action.run(async () => api(`/api/invitations/${invitation.id}/revoke`, { method: "POST" }).then(onChanged))}>
-                    {t("team.revokeInvite")}
-                </Button>
-            ) : null}
+            <div className="flex flex-wrap gap-2">
+                {invitation.status !== "used" ? (
+                    <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={action.busy}
+                        title={t("team.reissueHint")}
+                        onClick={() =>
+                            void action.run(async () => {
+                                const issued = await api<{ path: string; expiresAt: number }>(`/api/invitations/${invitation.id}/reissue`, { method: "POST" });
+                                setReissued({ url: `${window.location.origin}${issued.path}`, expiresAt: issued.expiresAt });
+                                onChanged();
+                            })
+                        }
+                    >
+                        {t("team.reissueInvite")}
+                    </Button>
+                ) : null}
+                {invitation.status === "active" ? (
+                    <Button variant="danger" size="sm" disabled={action.busy} onClick={() => void action.run(async () => api(`/api/invitations/${invitation.id}/revoke`, { method: "POST" }).then(onChanged))}>
+                        {t("team.revokeInvite")}
+                    </Button>
+                ) : null}
+            </div>
         </ListRow>
     );
 }

@@ -1,11 +1,11 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { companyConfig } from "../../config/company.ts";
-import { branches, companies, invitations, users, type Role } from "../../db/schema.ts";
+import { branches, companies, invitations, passwordResetCodes, users, type Role } from "../../db/schema.ts";
 import { loadCompanyBranch, resolveBranchScope } from "../access.ts";
 import { audit } from "../audit.ts";
 import { createSession, requireActor, type Actor } from "../auth.ts";
 import type { Ctx } from "../context.ts";
-import { hashPassword, randomToken, sha256Hex, timingSafeEqual } from "../crypto.ts";
+import { hashPassword, randomCode, randomToken, sha256Hex, timingSafeEqual } from "../crypto.ts";
 import { isUniqueViolation, newId } from "../db.ts";
 import { AppError, badRequest, clientIp, optStr, readJson, str } from "../http.ts";
 import { enforceRateLimit } from "../rate-limit.ts";
@@ -73,19 +73,54 @@ async function issueInvitation(
 
 // --- Владелец: ссылка активации первого директора ---
 
-export async function ownerIssueActivation(ctx: Ctx) {
+async function directorExists(ctx: Ctx, companyId: string): Promise<boolean> {
+    const row = await ctx.db.select({ id: users.id }).from(users).where(and(eq(users.companyId, companyId), eq(users.role, "director"))).limit(1).get();
+    return Boolean(row);
+}
+
+async function checkOwnerCode(ctx: Ctx, body: Record<string, unknown>) {
     const ip = clientIp(ctx.request);
     await enforceRateLimit(ctx.env.DB, `owner:${ip}`, 5, 15 * 60_000, ctx.now);
-    const body = await readJson(ctx.request);
     const code = str(body, "code", { max: 500 });
     const secret = getSecret(ctx.env, "OWNER_ACTIVATION_CODE");
     if (!secret) throw new AppError(503, "owner.notConfigured");
     if (!timingSafeEqual(await sha256Hex(code), await sha256Hex(secret))) {
         throw new AppError(403, "owner.invalidCode", { fields: { code: "owner.invalidCode" } });
     }
+}
+
+/**
+ * Владелец восстанавливает доступ директора, если тот потерял пароль (новая активация
+ * после первой запрещена): выпускается код сброса для указанного логина директора.
+ */
+export async function ownerDirectorReset(ctx: Ctx) {
+    const body = await readJson(ctx.request);
+    await checkOwnerCode(ctx, body);
+    const login = str(body, "login", { max: 64 }).toLowerCase();
+    const director = await ctx.db.select().from(users).where(and(eq(users.login, login), eq(users.role, "director"))).get();
+    if (!director || director.status !== "active") throw new AppError(404, "owner.directorNotFound", { fields: { login: "owner.directorNotFound" } });
+    const code = randomCode(10);
+    await ctx.db.update(passwordResetCodes).set({ usedAt: ctx.now }).where(and(eq(passwordResetCodes.userId, director.id), isNull(passwordResetCodes.usedAt)));
+    const expiresAt = ctx.now + companyConfig.resetCodeTtlHours * 60 * 60_000;
+    await ctx.db.insert(passwordResetCodes).values({ id: newId(), userId: director.id, codeHash: await sha256Hex(code), createdBy: "owner", createdAt: ctx.now, expiresAt });
+    await audit(ctx.db, { companyId: director.companyId, actorUserId: null, action: "owner.directorReset", entityType: "user", entityId: director.id }, ctx.now);
+    return { code, expiresAt, login: director.login };
+}
+
+/** Состояние первичной активации (без секретов): чтобы страница владельца показала нужную форму */
+export async function ownerStatus(ctx: Ctx) {
+    const company = await ctx.db.select().from(companies).orderBy(companies.createdAt).limit(1).get();
+    return { activated: Boolean(company && (await directorExists(ctx, company.id))) };
+}
+
+export async function ownerIssueActivation(ctx: Ctx) {
+    const body = await readJson(ctx.request);
+    await checkOwnerCode(ctx, body);
     const note = optStr(body, "note", 200);
     const ttlHours = readTtlHours(body, companyConfig.activationLinkTtlHours);
     let company = await ctx.db.select().from(companies).orderBy(companies.createdAt).limit(1).get();
+    // Первичная активация — только один раз: когда директор уже зарегистрирован, новые ссылки не выпускаются.
+    if (company && (await directorExists(ctx, company.id))) throw new AppError(409, "owner.alreadyActivated");
     if (!company) {
         const name = optStr(body, "companyName", 120) ?? companyConfig.name;
         const id = newId();
@@ -100,6 +135,11 @@ export async function ownerIssueActivation(ctx: Ctx) {
         company = await ctx.db.select().from(companies).where(eq(companies.id, id)).get();
         if (!company) throw new AppError(500, "error.internal");
     }
+    // Действует только последняя ссылка: прежние неиспользованные гасим.
+    await ctx.db
+        .update(invitations)
+        .set({ revokedAt: ctx.now })
+        .where(and(eq(invitations.companyId, company.id), eq(invitations.kind, "activation"), isNull(invitations.usedAt), isNull(invitations.revokedAt)));
     const issued = await issueInvitation(ctx, {
         kind: "activation",
         companyId: company.id,
@@ -171,6 +211,7 @@ export async function acceptInvitation(ctx: Ctx) {
     const loginValue = readLogin(body);
     const password = readNewPassword(body);
 
+    if (invitation.kind === "activation" && (await directorExists(ctx, invitation.companyId))) throw new AppError(410, "owner.alreadyActivated");
     if (invitation.branchId) {
         const branch = await ctx.db.select().from(branches).where(eq(branches.id, invitation.branchId)).get();
         if (!branch || branch.archivedAt !== null) throw new AppError(410, "invite.revoked");
@@ -188,7 +229,8 @@ export async function acceptInvitation(ctx: Ctx) {
             d1
                 .prepare(
                     `UPDATE invitations SET used_at = ?1, used_by_user_id = ?2, consume_nonce = ?3
-                     WHERE id = ?4 AND used_at IS NULL AND revoked_at IS NULL AND expires_at > ?1`
+                     WHERE id = ?4 AND used_at IS NULL AND revoked_at IS NULL AND expires_at > ?1
+                       AND (kind <> 'activation' OR NOT EXISTS (SELECT 1 FROM users WHERE company_id = invitations.company_id AND role = 'director'))`
                 )
                 .bind(ctx.now, userId, nonce, invitation.id),
             d1
@@ -289,18 +331,24 @@ export async function listInvitations(ctx: Ctx) {
     return { invitations: visible.map((row) => ({ ...row, status: invitationStatus(row, ctx.now) })) };
 }
 
-export async function revokeInvitation(ctx: Ctx) {
-    const actor = await requireActor(ctx);
-    if (actor.role === "employee") throw new AppError(403, "auth.forbidden");
+/** Приглашение компании, которым может управлять пользователь (руководитель — только сотрудники своего филиала) */
+async function loadManagedInvitation(ctx: Ctx, actor: Actor) {
     const invitation = await ctx.db
         .select()
         .from(invitations)
-        .where(and(eq(invitations.id, ctx.params["id"] ?? ""), eq(invitations.companyId, actor.companyId)))
+        .where(and(eq(invitations.id, ctx.params["id"] ?? ""), eq(invitations.companyId, actor.companyId), eq(invitations.kind, "invite")))
         .get();
     if (!invitation) throw new AppError(404, "error.notFound");
     if (actor.role === "manager" && (invitation.branchId !== actor.branchId || invitation.role !== "employee")) {
         throw new AppError(404, "error.notFound");
     }
+    return invitation;
+}
+
+export async function revokeInvitation(ctx: Ctx) {
+    const actor = await requireActor(ctx);
+    if (actor.role === "employee") throw new AppError(403, "auth.forbidden");
+    const invitation = await loadManagedInvitation(ctx, actor);
     if (invitation.usedAt === null && invitation.revokedAt === null) {
         await ctx.db
             .update(invitations)
@@ -309,4 +357,34 @@ export async function revokeInvitation(ctx: Ctx) {
         await audit(ctx.db, { companyId: actor.companyId, actorUserId: actor.userId, action: "invitation.revoke", entityType: "invitation", entityId: invitation.id }, ctx.now);
     }
     return { ok: true };
+}
+
+/**
+ * Перевыпуск: новая ссылка с теми же ролью, филиалом и пометкой; старая ссылка
+ * отключается в том же действии. Использованное приглашение перевыпустить нельзя.
+ */
+export async function reissueInvitation(ctx: Ctx) {
+    const actor = await requireActor(ctx);
+    if (actor.role === "employee") throw new AppError(403, "auth.forbidden");
+    const invitation = await loadManagedInvitation(ctx, actor);
+    if (invitation.usedAt !== null) throw new AppError(409, "invite.used");
+    if (invitation.branchId) {
+        const branch = await ctx.db.select().from(branches).where(eq(branches.id, invitation.branchId)).get();
+        if (!branch || branch.archivedAt !== null) throw new AppError(409, "branches.notFound");
+    }
+    const body = await readJson(ctx.request);
+    if (invitation.revokedAt === null) {
+        await ctx.db.update(invitations).set({ revokedAt: ctx.now, revokedBy: actor.userId }).where(and(eq(invitations.id, invitation.id), isNull(invitations.revokedAt)));
+    }
+    const issued = await issueInvitation(ctx, {
+        kind: "invite",
+        companyId: actor.companyId,
+        branchId: invitation.branchId,
+        role: invitation.role,
+        note: invitation.note,
+        createdBy: actor.userId,
+        ttlHours: readTtlHours(body, companyConfig.invitationTtlHours),
+    });
+    await audit(ctx.db, { companyId: actor.companyId, actorUserId: actor.userId, action: "invitation.reissue", entityType: "invitation", entityId: issued.id, data: { previous: invitation.id, role: invitation.role, branchId: invitation.branchId } }, ctx.now);
+    return issued;
 }

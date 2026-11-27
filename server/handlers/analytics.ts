@@ -5,7 +5,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { companyConfig } from "../../config/company.ts";
 import { branches, companies, kpiVersions, users } from "../../db/schema.ts";
-import { currentMonth, formatLocalDate, parseLocalDate, periodBounds, type LocalDate } from "../../lib/time.ts";
+import { currentMonth, formatLocalDate, parseLocalDate, periodBounds, startOfDay, type LocalDate } from "../../lib/time.ts";
 import { loadCompanyBranch, requireSection, resolveBranchScope } from "../access.ts";
 import { audit } from "../audit.ts";
 import { requireActor, type Actor } from "../auth.ts";
@@ -14,7 +14,7 @@ import { getFunnel } from "../crm/funnel.ts";
 import { toViews } from "../crm/leads.ts";
 import { newId } from "../db.ts";
 import { AppError, readJson } from "../http.ts";
-import { effectiveVersion, indicatorResult, parseIndicators, versionsFor, type Indicator } from "../kpi.ts";
+import { approvedVersions, indicatorResult, parseIndicators, pickVersion, userScope, versionsFor, type Indicator } from "../kpi.ts";
 import { computeMetrics, emptyValues, isMetric, leadsForMetric, METRICS, NO_OWNER, ratio, type MetricFilter, type MetricValues } from "../metrics.ts";
 
 type Scope = {
@@ -156,27 +156,51 @@ export async function statsLeads(ctx: Ctx) {
 
 // --- KPI: методика -------------------------------------------------------
 
-async function methodologyScope(ctx: Ctx, actor: Actor, requested: string | null): Promise<{ scope: string; canEdit: boolean }> {
+type MethodologyTarget = { scope: string; canEdit: boolean; kind: "company" | "branch" | "user"; branchId: string | null; userId: string | null; name: string | null };
+
+/**
+ * Область методики: «company», id филиала или «user:<id>» (формула отдельного сотрудника).
+ * Руководитель работает только со своим филиалом и его людьми.
+ */
+async function methodologyScope(ctx: Ctx, actor: Actor, requested: string | null): Promise<MethodologyTarget> {
     if (actor.role === "employee") throw new AppError(403, "auth.forbidden");
-    // Явно указанная область — как есть; по умолчанию руководителю — его филиал, директору — общая.
     const scope = requested ?? (actor.role === "manager" ? (actor.branchId ?? "company") : "company");
-    if (scope !== "company") {
-        const branch = await loadCompanyBranch(ctx, actor, scope, { includeArchived: true });
-        if (actor.role === "manager" && branch.id !== actor.branchId) throw new AppError(403, "auth.forbidden");
+    if (scope === "company") return { scope, canEdit: actor.role === "director", kind: "company", branchId: null, userId: null, name: null };
+    if (scope.startsWith("user:")) {
+        const person = await ctx.db.select().from(users).where(and(eq(users.id, scope.slice(5)), eq(users.companyId, actor.companyId))).get();
+        if (!person || person.role === "director") throw new AppError(404, "team.userNotFound");
+        if (actor.role === "manager" && person.branchId !== actor.branchId) throw new AppError(404, "team.userNotFound");
+        return { scope, canEdit: true, kind: "user", branchId: person.branchId, userId: person.id, name: person.displayName };
     }
-    return { scope, canEdit: actor.role === "director" || scope === actor.branchId };
+    const branch = await loadCompanyBranch(ctx, actor, scope, { includeArchived: true });
+    if (actor.role === "manager" && branch.id !== actor.branchId) throw new AppError(403, "auth.forbidden");
+    return { scope, canEdit: actor.role === "director" || scope === actor.branchId, kind: "branch", branchId: branch.id, userId: null, name: branch.name };
+}
+
+/** «ГГГГ-ММ-ДД» → полночь в часовом поясе компании; пусто — null (с момента утверждения) */
+function readStartDate(value: unknown, timezone: string): number | null {
+    if (value === undefined || value === null || value === "") return null;
+    const date = typeof value === "string" ? parseLocalDate(value) : null;
+    if (!date) throw new AppError(400, "kpi.startInvalid", { fields: { effectiveFrom: "kpi.startInvalid" } });
+    return startOfDay(timezone, date);
 }
 
 export async function methodology(ctx: Ctx) {
     const actor = await requireActor(ctx);
-    const { scope, canEdit } = await methodologyScope(ctx, actor, ctx.url.searchParams.get("scope"));
-    const rows = await versionsFor(ctx.db, actor.companyId, [scope]);
+    const target = await methodologyScope(ctx, actor, ctx.url.searchParams.get("scope"));
+    const rows = await versionsFor(ctx.db, actor.companyId, [target.scope]);
     const authorIds = [...new Set(rows.flatMap((row) => [row.createdBy, row.approvedBy]).filter((id): id is string => Boolean(id)))];
-    const authors = authorIds.length ? new Map((await ctx.db.select({ id: users.id, name: users.displayName }).from(users).where(inArray(users.id, authorIds)).all()).map((row) => [row.id, row.name])) : new Map();
-    const current = await effectiveVersion(ctx.db, actor.companyId, scope === "company" ? null : scope, ctx.now);
+    const [authorRows, applicable] = await Promise.all([
+        authorIds.length ? ctx.db.select({ id: users.id, name: users.displayName }).from(users).where(inArray(users.id, authorIds)).all() : Promise.resolve([]),
+        approvedVersions(ctx.db, actor.companyId, [target.scope, target.branchId ?? "company", "company"]),
+    ]);
+    const authors = new Map(authorRows.map((row) => [row.id, row.name]));
+    const current = pickVersion(applicable, { userId: target.userId, branchId: target.branchId }, ctx.now);
     return {
-        scope,
-        canEdit,
+        scope: target.scope,
+        kind: target.kind,
+        name: target.name,
+        canEdit: target.canEdit,
         fields: METRICS,
         currentVersionId: current?.id ?? null,
         currentScope: current?.scope ?? null,
@@ -189,29 +213,31 @@ export async function methodology(ctx: Ctx) {
             createdBy: authors.get(row.createdBy) ?? null,
             approvedAt: row.approvedAt,
             approvedBy: row.approvedBy ? (authors.get(row.approvedBy) ?? null) : null,
+            effectiveFrom: row.effectiveFrom,
         })),
     };
 }
 
-/** Сохранение создаёт новую версию (черновик); прежние версии не меняются */
+/** Сохранение создаёт новую версию (черновик) с датой начала действия; прежние версии не меняются */
 export async function saveMethodology(ctx: Ctx) {
     const actor = await requireActor(ctx);
     const body = await readJson(ctx.request);
-    const { scope, canEdit } = await methodologyScope(ctx, actor, typeof body["scope"] === "string" ? body["scope"] : null);
-    if (!canEdit) throw new AppError(403, "auth.forbidden");
+    const target = await methodologyScope(ctx, actor, typeof body["scope"] === "string" ? body["scope"] : null);
+    if (!target.canEdit) throw new AppError(403, "auth.forbidden");
     const indicators = parseIndicators(body["indicators"]);
+    const effectiveFrom = readStartDate(body["effectiveFrom"], await timezoneOf(ctx, actor));
     const id = newId();
     await ctx.env.DB.prepare(
-        `INSERT INTO kpi_versions (id, company_id, scope, version, status, indicators, created_by, created_at)
-         SELECT ?, ?, ?, COALESCE(MAX(version), 0) + 1, 'draft', ?, ?, ? FROM kpi_versions WHERE company_id = ? AND scope = ?`
+        `INSERT INTO kpi_versions (id, company_id, scope, version, status, indicators, created_by, created_at, effective_from)
+         SELECT ?, ?, ?, COALESCE(MAX(version), 0) + 1, 'draft', ?, ?, ?, ? FROM kpi_versions WHERE company_id = ? AND scope = ?`
     )
-        .bind(id, actor.companyId, scope, JSON.stringify(indicators), actor.userId, ctx.now, actor.companyId, scope)
+        .bind(id, actor.companyId, target.scope, JSON.stringify(indicators), actor.userId, ctx.now, effectiveFrom, actor.companyId, target.scope)
         .run();
-    await audit(ctx.db, { companyId: actor.companyId, actorUserId: actor.userId, action: "kpi.save", entityType: "kpi_version", entityId: id, data: { scope } }, ctx.now);
+    await audit(ctx.db, { companyId: actor.companyId, actorUserId: actor.userId, action: "kpi.save", entityType: "kpi_version", entityId: id, data: { scope: target.scope, effectiveFrom } }, ctx.now);
     return { id };
 }
 
-/** Утверждённая версия применяется ко всем расчётам начиная с момента утверждения */
+/** Утверждённая версия применяется с даты начала действия (или с момента утверждения) */
 export async function approveMethodology(ctx: Ctx) {
     const actor = await requireActor(ctx);
     const row = await ctx.db.select().from(kpiVersions).where(and(eq(kpiVersions.id, ctx.params["id"] ?? ""), eq(kpiVersions.companyId, actor.companyId))).get();
@@ -225,7 +251,70 @@ export async function approveMethodology(ctx: Ctx) {
     return { ok: true };
 }
 
-// --- KPI: отчёт ----------------------------------------------------------
+/**
+ * Копирование формулы на нескольких сотрудников: каждому — своя утверждённая версия
+ * с той же формулой и датой начала. Руководитель — только своим сотрудникам.
+ */
+export async function copyMethodology(ctx: Ctx) {
+    const actor = await requireActor(ctx);
+    if (actor.role === "employee") throw new AppError(403, "auth.forbidden");
+    const body = await readJson(ctx.request);
+    const indicators = parseIndicators(body["indicators"]);
+    const ids = Array.isArray(body["userIds"]) ? [...new Set(body["userIds"].filter((id): id is string => typeof id === "string"))] : [];
+    if (!ids.length || ids.length > 200) throw new AppError(400, "kpi.copyNoPeople", { fields: { userIds: "kpi.copyNoPeople" } });
+    const people = await ctx.db.select().from(users).where(and(inArray(users.id, ids), eq(users.companyId, actor.companyId))).all();
+    const allowed = people.filter((person) => person.role !== "director" && (actor.role === "director" || person.branchId === actor.branchId));
+    if (allowed.length !== ids.length) throw new AppError(404, "team.userNotFound");
+    const effectiveFrom = readStartDate(body["effectiveFrom"], await timezoneOf(ctx, actor));
+    const json = JSON.stringify(indicators);
+    const d1 = ctx.env.DB;
+    const statements = allowed.map((person) =>
+        d1
+            .prepare(
+                `INSERT INTO kpi_versions (id, company_id, scope, version, status, indicators, created_by, created_at, approved_by, approved_at, effective_from)
+                 SELECT ?1, ?2, ?3, COALESCE(MAX(version), 0) + 1, 'approved', ?4, ?5, ?6, ?5, ?6, ?7 FROM kpi_versions WHERE company_id = ?2 AND scope = ?3`
+            )
+            .bind(newId(), actor.companyId, userScope(person.id), json, actor.userId, ctx.now, effectiveFrom)
+    );
+    await d1.batch(statements);
+    await audit(ctx.db, { companyId: actor.companyId, actorUserId: actor.userId, action: "kpi.copy", entityType: "kpi_version", entityId: null, data: { userIds: allowed.map((person) => person.id), effectiveFrom } }, ctx.now);
+    return { copied: allowed.length };
+}
+
+/** Предпросмотр расчёта несохранённой формулы на данных текущего месяца */
+export async function previewMethodology(ctx: Ctx) {
+    const actor = await requireActor(ctx);
+    const body = await readJson(ctx.request);
+    const target = await methodologyScope(ctx, actor, typeof body["scope"] === "string" ? body["scope"] : null);
+    const indicators = parseIndicators(body["indicators"]);
+    const [timezone, funnel] = await Promise.all([timezoneOf(ctx, actor), getFunnel(ctx.db, actor.companyId)]);
+    const month = currentMonth(timezone, ctx.now);
+    const bounds = periodBounds(timezone, month.from, month.to);
+    const branchIds: string[] | "all" = target.kind === "company" ? (actor.role === "manager" && actor.branchId ? [actor.branchId] : "all") : target.branchId ? [target.branchId] : [];
+    const filter = { companyId: actor.companyId, branchIds, ownerUserId: target.userId, from: bounds.from, to: bounds.to, now: ctx.now };
+    const scope: Scope = { filter, timezone, period: { from: formatLocalDate(month.from), to: formatLocalDate(month.to) }, branchIds, branchName: null, userName: null };
+    const [{ byOwner }, people] = await Promise.all([computeMetrics(ctx.db, filter, funnel), peopleInScope(ctx, actor, scope, [])]);
+    const rows = people
+        .filter((person) => !target.userId || person.id === target.userId)
+        .slice(0, 30)
+        .map((person) => {
+            const values = byOwner.get(person.id) ?? emptyValues();
+            return { userId: person.id, name: person.name, branchName: person.branchName, indicators: indicators.map((indicator) => indicatorResult(indicator, values)) };
+        });
+    return { period: scope.period, timezone, rows };
+}
+
+// --- KPI: отчёт и прогноз ------------------------------------------------
+
+/** Показатели «на момент»: их не продлеваем до конца периода */
+const SNAPSHOT_METRICS = new Set(["open_leads", "overdue_contacts"]);
+
+/** Прогноз на конец периода: накопительные показатели продлеваются в текущем темпе */
+function forecastValues(values: MetricValues, factor: number): MetricValues {
+    const result = { ...values };
+    for (const key of Object.keys(result) as Array<keyof MetricValues>) if (!SNAPSHOT_METRICS.has(key)) result[key] = values[key] * factor;
+    return result;
+}
 
 export async function kpiReport(ctx: Ctx) {
     const actor = await requireActor(ctx);
@@ -238,21 +327,37 @@ export async function kpiReport(ctx: Ctx) {
     ]);
     const people = peopleRows.filter((person) => self || !scope.filter.ownerUserId || person.id === scope.filter.ownerUserId);
 
-    // Действующие версии методики — по одной на филиал, все сразу.
-    const branchKeys = [...new Set(people.map((person) => person.branchId ?? null))];
-    const versions = await Promise.all(branchKeys.map((branchId) => effectiveVersion(ctx.db, actor.companyId, branchId, scope.filter.to)));
-    const versionCache = new Map(branchKeys.map((branchId, index) => [branchId ?? "company", versions[index]]));
+    // Все нужные версии методики (сотрудники, филиалы, общая) — одним запросом.
+    const scopes = ["company", ...people.map((person) => userScope(person.id)), ...people.map((person) => person.branchId).filter((id): id is string => Boolean(id))];
+    const versions = await approvedVersions(ctx.db, actor.companyId, scopes);
+
+    // Ход периода для прогноза: сколько дней прошло из скольких
+    const DAY = 86_400_000;
+    const totalDays = Math.max(1, Math.round((scope.filter.to - scope.filter.from) / DAY));
+    const elapsedDays = Math.min(totalDays, Math.max(0, Math.ceil((ctx.now - scope.filter.from) / DAY)));
+    const factor = ctx.now >= scope.filter.to ? 1 : elapsedDays > 0 ? totalDays / elapsedDays : null;
+
     const rows = [];
+    // Какая версия действует для периода: прошлый период — на его конец; текущий — на сегодня
+    // (версии с будущей датой начала ещё не применяются); будущий — на его первый день.
+    const reference = Math.min(scope.filter.to, Math.max(ctx.now, scope.filter.from));
     for (const person of people) {
-        const version = versionCache.get(person.branchId ?? "company") ?? null;
+        const version = pickVersion(versions, { userId: person.id, branchId: person.branchId }, reference);
         const values = byOwner.get(person.id) ?? emptyValues();
+        const projected = factor === null ? null : forecastValues(values, factor);
         rows.push({
             userId: person.id,
             name: person.name,
             branchName: person.branchName,
-            version: version ? { id: version.id, version: version.version, scope: version.scope, approvedAt: version.approvedAt } : null,
+            version: version ? { id: version.id, version: version.version, scope: version.scope.startsWith("user:") ? "user" : version.scope === "company" ? "company" : "branch", approvedAt: version.approvedAt, effectiveFrom: version.effectiveFrom } : null,
             values,
-            indicators: version ? (JSON.parse(version.indicators) as Indicator[]).map((indicator) => indicatorResult(indicator, values)) : [],
+            indicators: version
+                ? (JSON.parse(version.indicators) as Indicator[]).map((indicator) => {
+                      const result = indicatorResult(indicator, values);
+                      const forecast = projected ? indicatorResult(indicator, projected) : null;
+                      return { ...result, forecast: forecast?.fact ?? null, forecastPercent: forecast?.percent ?? null };
+                  })
+                : [],
         });
     }
     return {
@@ -263,6 +368,7 @@ export async function kpiReport(ctx: Ctx) {
         configured: rows.some((row) => row.version !== null),
         fields: METRICS,
         currency: companyConfig.currency,
+        progress: { elapsedDays, totalDays, complete: ctx.now >= scope.filter.to, started: factor !== null },
         rows,
     };
 }

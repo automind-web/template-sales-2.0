@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AuthLayout } from "../../components/auth-layout.tsx";
 import { CopyLink } from "../../components/copy-link.tsx";
 import { Field, FormMessage } from "../../components/ui/field.tsx";
@@ -12,6 +12,60 @@ import { api, ApiError, errorMessage } from "../../lib/api.ts";
 
 /** Первый запуск: владелец сайта выпускает одноразовое приглашение первого директора */
 export default function OwnerPage() {
+    const [activated, setActivated] = useState<boolean | null>(null);
+    useEffect(() => {
+        api<{ activated: boolean }>("/api/owner/status").then(
+            (status) => setActivated(status.activated),
+            () => setActivated(false)
+        );
+    }, []);
+    if (activated === null) return <AuthLayout title={t("owner.title")}>{null}</AuthLayout>;
+    return activated ? <DirectorRecovery /> : <Activation />;
+}
+
+/** После первой активации: только восстановление доступа директора кодом сброса */
+function DirectorRecovery() {
+    const [form, setForm] = useState({ code: "", login: "" });
+    const [fields, setFields] = useState<Record<string, string>>({});
+    const [error, setError] = useState<string | null>(null);
+    const [busy, setBusy] = useState(false);
+    const [result, setResult] = useState<{ code: string; login: string; expiresAt: number } | null>(null);
+    async function submit() {
+        setBusy(true);
+        setError(null);
+        setFields({});
+        try {
+            setResult(await api<{ code: string; login: string; expiresAt: number }>("/api/owner/director-reset", { method: "POST", body: form }));
+            setForm((current) => ({ ...current, code: "" }));
+        } catch (caught) {
+            setError(errorMessage(caught));
+            if (caught instanceof ApiError) setFields(caught.fields);
+        } finally {
+            setBusy(false);
+        }
+    }
+    return (
+        <AuthLayout title={t("owner.activatedTitle")} subtitle={t("owner.activatedText")}>
+            {result ? (
+                <div className="mb-5 grid gap-2">
+                    <FormMessage kind="success">{t("owner.resetResult", { login: result.login, date: formatDateTime(result.expiresAt) })}</FormMessage>
+                    <p className="rounded-lg border border-border bg-muted px-3 py-3 text-center font-mono text-xl tracking-[0.2em] select-all">{result.code}</p>
+                </div>
+            ) : null}
+            <Form variant="auth" onSubmit={submit} busy={busy} canSubmit={form.code.trim() !== "" && form.login.trim() !== ""} submitLabel={t("owner.resetSubmit")}>
+                {error ? <FormMessage kind="error">{error}</FormMessage> : null}
+                <Field label={t("owner.code")} error={fields["code"]}>
+                    <Input type="password" autoComplete="off" value={form.code} onChange={(event) => setForm((current) => ({ ...current, code: event.target.value }))} autoFocus />
+                </Field>
+                <Field label={t("owner.directorLogin")} error={fields["login"]}>
+                    <Input autoCapitalize="none" spellCheck={false} value={form.login} onChange={(event) => setForm((current) => ({ ...current, login: event.target.value }))} />
+                </Field>
+            </Form>
+        </AuthLayout>
+    );
+}
+
+function Activation() {
     const [form, setForm] = useState({ code: "", companyName: companyConfig.name, ttlHours: String(companyConfig.activationLinkTtlHours) });
     const [fields, setFields] = useState<Record<string, string>>({});
     const [error, setError] = useState<string | null>(null);

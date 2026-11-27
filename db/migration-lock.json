@@ -5,5 +5,6 @@
   "0003_kpi.sql": "01dc2ee8ae8c066e087e40a1b7eb9593efdf98e3907e21c90b49d721a8d5ef40",
   "0004_whatsapp.sql": "8e4d361698e44e59efce1ef009b89101604cb42b909c50cb2b8d90a5d9b2e074",
   "0005_whatsapp_studio.sql": "b2487164cae068dca87a0385b29dc5633f2fea1a32c67f8f0022942366c61886",
-  "0006_remove_old_whatsapp.sql": "934a433a0b7afbad96291ebf1a72aad55bdb097e06b92d0652a94e41a4ac6756"
+  "0006_remove_old_whatsapp.sql": "934a433a0b7afbad96291ebf1a72aad55bdb097e06b92d0652a94e41a4ac6756",
+  "0007_access_and_kpi.sql": "36f1c47cbb071ff2823aa13c4e4b26df1ecc942683d221c831dd8fe2e5cd690b"
 }

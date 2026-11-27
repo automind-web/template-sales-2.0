@@ -152,7 +152,7 @@ function Sidebar({ onNavigate, closeSpace = false }: { onNavigate: () => void; c
                             <span className="min-w-0">
                                 <span className="block truncate text-sm font-semibold">{me.user.displayName}</span>
                                 <span className="block truncate text-xs text-muted-foreground">
-                                    {t(`role.${me.user.role}` as MessageKey)}
+                                    {me.user.workRoleName ?? t(`role.${me.user.role}` as MessageKey)}
                                     {me.user.branchName ? ` · ${me.user.branchName}` : ""}
                                 </span>
                             </span>

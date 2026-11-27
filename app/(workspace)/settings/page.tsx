@@ -7,23 +7,28 @@ import { CompanySettings } from "../../../components/settings/company.tsx";
 import { InvitationsSettings } from "../../../components/settings/invitations.tsx";
 import { MembersSettings } from "../../../components/settings/members.tsx";
 import { ProcessSettings } from "../../../components/settings/process.tsx";
+import { AccessLog } from "../../../components/settings/access-log.tsx";
+import { WorkRolesSettings } from "../../../components/settings/work-roles.tsx";
 import { Tabs, useTab, type TabItem } from "../../../components/ui/tabs.tsx";
 import { t } from "../../../i18n/index.ts";
 
-type TabKey = "company" | "branches" | "members" | "invitations" | "process";
+type TabKey = "company" | "branches" | "members" | "invitations" | "workRoles" | "process" | "access";
 
 const DIRECTOR_TABS: ReadonlyArray<TabItem<TabKey>> = [
     { key: "company", label: t("settings.tab.company") },
     { key: "branches", label: t("settings.tab.branches") },
     { key: "members", label: t("settings.tab.members") },
     { key: "invitations", label: t("settings.tab.invitations") },
+    { key: "workRoles", label: t("settings.tab.workRoles") },
     { key: "process", label: t("settings.tab.process") },
+    { key: "access", label: t("settings.tab.access") },
 ];
 
 /** Руководитель филиала управляет только участниками и приглашениями своего филиала */
 const MANAGER_TABS: ReadonlyArray<TabItem<TabKey>> = [
     { key: "members", label: t("settings.tab.members") },
     { key: "invitations", label: t("settings.tab.invitations") },
+    { key: "access", label: t("settings.tab.access") },
 ];
 
 export default function SettingsPage() {
@@ -46,6 +51,8 @@ function Settings() {
             {tab === "branches" ? <BranchesSettings /> : null}
             {tab === "members" ? <MembersSettings /> : null}
             {tab === "invitations" ? <InvitationsSettings /> : null}
+            {tab === "workRoles" ? <WorkRolesSettings /> : null}
+            {tab === "access" ? <AccessLog /> : null}
         </Page>
     );
 }

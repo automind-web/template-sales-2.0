@@ -29,7 +29,11 @@ export type Member = {
     admitted: boolean;
     canManage: boolean;
     isSelf: boolean;
+    workRoleId: string | null;
+    workRoleName: string | null;
 };
+
+type WorkRole = { id: string; name: string; archived: boolean };
 
 export const roleLabel = (role: Role) => t(`role.${role}` as MessageKey);
 
@@ -46,6 +50,7 @@ export function MembersSettings() {
     const { me } = useSession();
     const query = useBranchQuery();
     const list = useApiData(`members${query}`, (signal) => api<{ users: Member[] }>(`/api/users${query}`, { signal }).then((result) => result.users));
+    const workRoles = useApiData("work-roles", (signal) => api<{ workRoles: WorkRole[] }>("/api/work-roles", { signal }).then((result) => result.workRoles.filter((role) => !role.archived)));
     const [error, setError] = useState<string | null>(null);
     const [resetFor, setResetFor] = useState<Member | null>(null);
     const isDirector = me.user.role === "director";
@@ -80,6 +85,7 @@ export function MembersSettings() {
                         <Th>{t("team.member")}</Th>
                         <Th>{t("common.role")}</Th>
                         <Th>{t("common.branch")}</Th>
+                        <Th>{t("workRoles.column")}</Th>
                         <Th>{t("team.lastLogin")}</Th>
                         <Th className="text-right">{t("team.access")}</Th>
                         <Th>
@@ -122,6 +128,20 @@ export function MembersSettings() {
                                         </Select>
                                     ) : (
                                         (member.branchName ?? t("common.none"))
+                                    )}
+                                </Td>
+                                <Td className="min-w-44">
+                                    {member.canManage && member.role !== "director" && (workRoles.data?.length ?? 0) > 0 ? (
+                                        <Select aria-label={`${t("workRoles.column")}: ${member.displayName}`} value={member.workRoleId ?? ""} onChange={(event) => void change(member, `/api/users/${member.id}`, "PATCH", { workRoleId: event.target.value || null })}>
+                                            <option value="">{t("workRoles.none")}</option>
+                                            {(workRoles.data ?? []).map((role) => (
+                                                <option key={role.id} value={role.id}>
+                                                    {role.name}
+                                                </option>
+                                            ))}
+                                        </Select>
+                                    ) : (
+                                        <span className="text-muted-foreground">{member.workRoleName ?? t("workRoles.none")}</span>
                                     )}
                                 </Td>
                                 <Td className="text-[13px] whitespace-nowrap text-muted-foreground">{member.lastLoginAt ? formatDateTime(member.lastLoginAt, me.company.timezone) : t("team.never")}</Td>

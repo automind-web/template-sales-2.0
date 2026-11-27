@@ -11,7 +11,7 @@ export type Section = "training" | "crm" | "kpi" | "stats" | "whatsapp" | "setti
 export type Role = "director" | "manager" | "employee";
 
 export type Me = {
-    user: { id: string; displayName: string; login: string; role: Role; branchId: string | null; branchName: string | null; admitted: boolean };
+    user: { id: string; displayName: string; login: string; role: Role; branchId: string | null; branchName: string | null; admitted: boolean; workRoleName?: string | null };
     company: { id: string; name: string; timezone: string };
     branches: Array<{ id: string; name: string; city: string | null }>;
     selectedBranchId: string | null;

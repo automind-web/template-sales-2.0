@@ -58,6 +58,8 @@ export const users = sqliteTable("users", {
     createdAt: integer("created_at").notNull().default(nowMs),
     updatedAt: integer("updated_at").notNull().default(nowMs),
     lastLoginAt: integer("last_login_at"),
+    /** Рабочая роль (должность) — может ограничить доступные разделы; null — без ограничений */
+    workRoleId: text("work_role_id"),
 }, (t) => [
     uniqueIndex("users_login_unique").on(t.login),
     index("users_company_branch_idx").on(t.companyId, t.branchId),
@@ -145,6 +147,21 @@ export const auditLog = sqliteTable("audit_log", {
     data: text("data"),
     createdAt: integer("created_at").notNull(),
 }, (t) => [index("audit_log_company_idx").on(t.companyId, t.createdAt)]);
+
+/**
+ * Рабочие роли (должности) компании: «Менеджер по продажам», «Оператор» и т. п.
+ * sections — какие рабочие разделы открыты этой роли (crm, kpi, stats); права системной
+ * роли не расширяются, только сужаются.
+ */
+export const workRoles = sqliteTable("work_roles", {
+    id: text("id").primaryKey(),
+    companyId: text("company_id").notNull().references(() => companies.id),
+    name: text("name").notNull(),
+    sections: text("sections").notNull().default('["crm","kpi","stats"]'),
+    createdBy: text("created_by").notNull(),
+    createdAt: integer("created_at").notNull(),
+    archivedAt: integer("archived_at"),
+}, (t) => [index("work_roles_company_idx").on(t.companyId)]);
 
 // ---------------------------------------------------------------------------
 // Этап 2. Обучение
@@ -353,6 +370,8 @@ export const kpiVersions = sqliteTable("kpi_versions", {
     createdAt: integer("created_at").notNull(),
     approvedBy: text("approved_by"),
     approvedAt: integer("approved_at"),
+    /** Дата начала действия (полночь в часовом поясе компании); null — с момента утверждения */
+    effectiveFrom: integer("effective_from"),
 }, (t) => [
     uniqueIndex("kpi_versions_scope_version_unique").on(t.companyId, t.scope, t.version),
     index("kpi_versions_approved_idx").on(t.companyId, t.scope, t.approvedAt),

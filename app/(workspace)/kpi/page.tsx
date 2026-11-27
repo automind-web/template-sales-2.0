@@ -16,15 +16,21 @@ import { Tabs, useTab, type TabItem } from "../../../components/ui/tabs.tsx";
 import { formatMoney, formatShort, t, type MessageKey } from "../../../i18n/index.ts";
 import { api } from "../../../lib/api.ts";
 import { useApiData } from "../../../lib/use-api.ts";
+import { cn } from "../../../lib/utils.ts";
 
-type IndicatorResult = { key: string; title: string; unit: "count" | "money" | "percent"; plan: number | null; fact: number | null; reason: string | null; percent: number | null; fields: string[] };
-type ReportRow = { userId: string; name: string; branchName: string | null; version: { version: number; scope: string; approvedAt: number | null } | null; indicators: IndicatorResult[] };
-type Report = { period: { from: string; to: string }; timezone: string; branchName: string | null; self: boolean; configured: boolean; fields: string[]; rows: ReportRow[] };
+type IndicatorResult = { key: string; title: string; unit: "count" | "money" | "percent"; plan: number | null; fact: number | null; reason: string | null; percent: number | null; fields: string[]; forecast: number | null; forecastPercent: number | null };
+type ReportRow = { userId: string; name: string; branchName: string | null; version: { version: number; scope: string; approvedAt: number | null; effectiveFrom: number | null } | null; indicators: IndicatorResult[] };
+type Report = { period: { from: string; to: string }; timezone: string; branchName: string | null; self: boolean; configured: boolean; fields: string[]; rows: ReportRow[]; progress: { elapsedDays: number; totalDays: number; complete: boolean; started: boolean } };
 
-type TabKey = "report" | "builder";
+type TabKey = "report" | "forecast" | "builder";
 const TABS: ReadonlyArray<TabItem<TabKey>> = [
     { key: "report", label: t("kpi.tab.report") },
+    { key: "forecast", label: t("kpi.tab.forecast") },
     { key: "builder", label: t("kpi.tab.builder") },
+];
+const EMPLOYEE_TABS: ReadonlyArray<TabItem<TabKey>> = [
+    { key: "report", label: t("kpi.tab.report") },
+    { key: "forecast", label: t("kpi.tab.forecast") },
 ];
 
 export default function KpiPage() {
@@ -37,7 +43,17 @@ export default function KpiPage() {
 
 function Kpi() {
     const { me } = useSession();
-    return <Page title={t("kpi.title")}>{me.user.role === "employee" ? <ReportView /> : <StaffKpi />}</Page>;
+    return <Page title={t("kpi.title")}>{me.user.role === "employee" ? <EmployeeKpi /> : <StaffKpi />}</Page>;
+}
+
+function EmployeeKpi() {
+    const [tab, setTab] = useTab(EMPLOYEE_TABS);
+    return (
+        <>
+            <Tabs items={EMPLOYEE_TABS} value={tab} onChange={setTab} label={t("kpi.title")} />
+            {tab === "forecast" ? <ReportView forecast /> : <ReportView />}
+        </>
+    );
 }
 
 function StaffKpi() {
@@ -45,7 +61,7 @@ function StaffKpi() {
     return (
         <>
             <Tabs items={TABS} value={tab} onChange={setTab} label={t("kpi.title")} />
-            {tab === "report" ? <ReportView onSetup={() => setTab("builder")} /> : <KpiBuilder />}
+            {tab === "report" ? <ReportView onSetup={() => setTab("builder")} /> : tab === "forecast" ? <ReportView forecast onSetup={() => setTab("builder")} /> : <KpiBuilder />}
         </>
     );
 }
@@ -62,7 +78,7 @@ function percentTone(percent: number | null) {
     return percent >= 100 ? ("success" as const) : percent >= 70 ? ("warning" as const) : ("danger" as const);
 }
 
-function ReportView({ onSetup }: { onSetup?: () => void }) {
+function ReportView({ onSetup, forecast = false }: { onSetup?: () => void; forecast?: boolean }) {
     const { me } = useSession();
     const slice = useSlice();
     const staff = me.user.role !== "employee";
@@ -104,7 +120,13 @@ function ReportView({ onSetup }: { onSetup?: () => void }) {
             ) : (
                 <>
                     <SliceSummary period={data.data.period} branchName={data.data.self ? (me.user.branchName ?? null) : data.data.branchName} userName={data.data.self ? me.user.displayName : null} timezone={data.data.timezone} />
-                    {data.data.self ? <PersonalReport row={data.data.rows[0]!} timezone={data.data.timezone} drill={drill} /> : <TeamReport report={data.data} drill={drill} />}
+                    {forecast ? (
+                        <ForecastView report={data.data} />
+                    ) : data.data.self ? (
+                        <PersonalReport row={data.data.rows[0]!} timezone={data.data.timezone} drill={drill} />
+                    ) : (
+                        <TeamReport report={data.data} drill={drill} />
+                    )}
                 </>
             )}
         </div>
@@ -115,7 +137,8 @@ function VersionLine({ row, timezone }: { row: ReportRow; timezone: string }) {
     if (!row.version) return null;
     return (
         <p className="text-[13px] text-muted-foreground">
-            {t("kpi.version", { version: row.version.version, scope: row.version.scope === "company" ? t("kpi.scope.company") : t("kpi.scope.branch"), date: row.version.approvedAt ? formatShort(row.version.approvedAt, timezone) : "—" })}
+            {t("kpi.version", { version: row.version.version, scope: t(`kpi.scope.${row.version.scope}` as MessageKey), date: row.version.approvedAt ? formatShort(row.version.approvedAt, timezone) : "—" })}
+            {row.version.effectiveFrom ? ` · ${t("kpi.effectiveFrom", { date: formatShort(row.version.effectiveFrom, timezone).split(",")[0]! })}` : ""}
         </p>
     );
 }
@@ -231,6 +254,77 @@ function TeamReport({ report, drill }: { report: Report; drill: (indicator: Indi
             </Table>
             {versions.map((row) => (
                 <VersionLine key={`${row.version!.scope}-${row.version!.version}`} row={row} timezone={report.timezone} />
+            ))}
+        </div>
+    );
+}
+
+/** Прогноз на конец периода: факт сейчас, прогноз, план и ожидаемое выполнение */
+function ForecastView({ report }: { report: Report }) {
+    const { progress } = report;
+    const percentDone = Math.round((progress.elapsedDays * 100) / progress.totalDays);
+    const tone = (percent: number | null) => (percent === null ? ("neutral" as const) : percent >= 100 ? ("success" as const) : percent >= 80 ? ("warning" as const) : ("danger" as const));
+    const verdict = (percent: number | null) => (percent === null ? "—" : percent >= 100 ? t("kpi.onTrack") : percent >= 80 ? t("kpi.atRisk") : t("kpi.offTrack"));
+    return (
+        <div className="grid gap-4">
+            <Card className="grid gap-2 p-5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-semibold">{t("kpi.progress", { elapsed: progress.elapsedDays, total: progress.totalDays })}</span>
+                    <span className="text-sm text-muted-foreground">{percentDone}%</span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={percentDone} aria-valuemin={0} aria-valuemax={100} aria-label={t("kpi.progress", { elapsed: progress.elapsedDays, total: progress.totalDays })}>
+                    <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${percentDone}%` }} />
+                </div>
+                <p className="text-[13px] text-muted-foreground">{!progress.started ? t("kpi.forecastNotStarted") : progress.complete ? t("kpi.forecastDone") : t("kpi.forecastHint")}</p>
+            </Card>
+            {report.rows.map((row) => (
+                <div key={row.userId} className="grid gap-2">
+                    {!report.self ? (
+                        <h3 className="font-bold">
+                            {row.name}
+                            {row.branchName && !report.branchName ? <span className="font-normal text-muted-foreground"> · {row.branchName}</span> : null}
+                        </h3>
+                    ) : null}
+                    {row.indicators.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">{t("kpi.notConfiguredEmployee")}</p>
+                    ) : (
+                        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                            {row.indicators.map((indicator) => (
+                                <Card key={indicator.key} className="grid gap-3 p-5">
+                                    <div className="flex items-start justify-between gap-2">
+                                        <h4 className="font-bold break-anywhere">{indicator.title}</h4>
+                                        <StatusPill tone={tone(indicator.forecastPercent)}>{verdict(indicator.forecastPercent)}</StatusPill>
+                                    </div>
+                                    <dl className="grid grid-cols-3 gap-2 text-sm">
+                                        <div>
+                                            <dt className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">{t("kpi.factNow")}</dt>
+                                            <dd className="mt-1 text-lg font-bold">{formatValue(indicator.unit, indicator.fact)}</dd>
+                                        </div>
+                                        <div>
+                                            <dt className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">{t("kpi.forecast")}</dt>
+                                            <dd className="mt-1 text-lg font-bold text-primary">{formatValue(indicator.unit, indicator.forecast)}</dd>
+                                        </div>
+                                        <div>
+                                            <dt className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">{t("kpi.plan")}</dt>
+                                            <dd className="mt-1 text-lg font-bold text-foreground/60">{indicator.plan === null ? "—" : formatValue(indicator.unit, indicator.plan)}</dd>
+                                        </div>
+                                    </dl>
+                                    {indicator.forecastPercent !== null ? (
+                                        <div className="grid gap-1.5">
+                                            <div className="flex justify-between gap-2 text-[13px] text-muted-foreground">
+                                                <span>{t("kpi.forecastPercent")}</span>
+                                                <span className="font-semibold text-foreground/80">{indicator.forecastPercent}%</span>
+                                            </div>
+                                            <div role="progressbar" aria-valuenow={indicator.forecastPercent} aria-valuemin={0} aria-valuemax={100} aria-label={t("kpi.forecastPercent")} className="h-1.5 overflow-hidden rounded-full bg-muted">
+                                                <div className={cn("h-full rounded-full transition-all duration-500", indicator.forecastPercent >= 100 ? "bg-success" : indicator.forecastPercent >= 80 ? "bg-warning" : "bg-danger")} style={{ width: `${Math.min(100, indicator.forecastPercent)}%` }} />
+                                            </div>
+                                        </div>
+                                    ) : null}
+                                </Card>
+                            ))}
+                        </div>
+                    )}
+                </div>
             ))}
         </div>
     );

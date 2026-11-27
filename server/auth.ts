@@ -1,11 +1,24 @@
 import { and, eq, isNull, ne, sql } from "drizzle-orm";
 import { companyConfig } from "../config/company.ts";
-import { admissions, sessions, users, type Role } from "../db/schema.ts";
+import { admissions, sessions, users, workRoles, type Role } from "../db/schema.ts";
 import type { Ctx } from "./context.ts";
 import { randomToken, sha256Hex } from "./crypto.ts";
 import { AppError, serializeCookie } from "./http.ts";
 
 export const SESSION_COOKIE = "asc_session";
+
+/** Разделы, которые может ограничить рабочая роль */
+export const WORK_SECTIONS = ["crm", "kpi", "stats"] as const;
+
+export function parseSections(raw: string | null | undefined): string[] | null {
+    if (raw === null || raw === undefined) return null;
+    try {
+        const value = JSON.parse(raw) as unknown;
+        return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && (WORK_SECTIONS as readonly string[]).includes(item)) : null;
+    } catch {
+        return null;
+    }
+}
 const LAST_SEEN_THROTTLE_MS = 5 * 60_000;
 
 /** Пользователь текущего запроса. Читается из БД при каждом запросе. */
@@ -22,6 +35,9 @@ export type Actor = {
     sessionId: string;
     /** Выбор директора в шапке: id филиала, '*' (все) или null (не выбран) */
     selectedBranchId: string | null;
+    /** Рабочая роль: разделы, которые она открывает (crm, kpi, stats); null — без ограничений */
+    workSections: string[] | null;
+    workRoleName: string | null;
 };
 
 export async function loadActor(ctx: Ctx): Promise<Actor | null> {
@@ -47,9 +63,13 @@ export async function loadActor(ctx: Ctx): Promise<Actor | null> {
             status: users.status,
             // Отметка «Прошёл обучение» — в том же запросе, без отдельного обращения к базе.
             hasAdmission: sql<number>`exists (select 1 from ${admissions} where ${admissions.userId} = ${users.id} and ${admissions.revokedAt} is null)`,
+            workSections: workRoles.sections,
+            workRoleName: workRoles.name,
         })
         .from(sessions)
         .innerJoin(users, eq(users.id, sessions.userId))
+        // Рабочая роль — тем же запросом; роль в архиве ограничений не накладывает.
+        .leftJoin(workRoles, and(eq(workRoles.id, users.workRoleId), isNull(workRoles.archivedAt)))
         .where(eq(sessions.id, sessionId))
         .get();
 
@@ -77,6 +97,8 @@ export async function loadActor(ctx: Ctx): Promise<Actor | null> {
         admitted,
         sessionId: row.sessionId,
         selectedBranchId: row.selectedBranchId,
+        workSections: parseSections(row.workSections),
+        workRoleName: row.workRoleName ?? null,
     };
     return ctx.actor;
 }

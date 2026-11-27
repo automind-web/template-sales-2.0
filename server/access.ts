@@ -12,6 +12,8 @@ export const SECTIONS = ["training", "crm", "kpi", "stats", "whatsapp", "setting
 export type Section = (typeof SECTIONS)[number];
 
 export function canUseSection(actor: Actor, section: Section): boolean {
+    // Рабочая роль сужает доступ к рабочим разделам (кроме директора).
+    if (actor.role !== "director" && actor.workSections && (section === "crm" || section === "kpi" || section === "stats") && !actor.workSections.includes(section)) return false;
     switch (section) {
         case "training":
         case "profile":

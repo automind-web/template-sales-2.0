@@ -10,6 +10,8 @@ import * as invitationsApi from "./handlers/invitations.ts";
 import * as integrationApi from "./handlers/integration.ts";
 import * as orgApi from "./handlers/organization.ts";
 import * as trainingApi from "./handlers/training.ts";
+import * as workRolesApi from "./handlers/work-roles.ts";
+import * as auditApi from "./handlers/access-log.ts";
 import { handleStudio } from "./wa/gateway.ts";
 
 type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -43,11 +45,14 @@ export const routes: Route[] = [
 
     // Владелец сайта и приглашения
     { method: "POST", pattern: "/api/owner/activation-links", handler: invitationsApi.ownerIssueActivation },
+    { method: "GET", pattern: "/api/owner/status", handler: invitationsApi.ownerStatus },
+    { method: "POST", pattern: "/api/owner/director-reset", handler: invitationsApi.ownerDirectorReset },
     { method: "GET", pattern: "/api/invitations/by-token/:token", handler: invitationsApi.viewInvitation },
     { method: "POST", pattern: "/api/invitations/by-token/:token/accept", handler: invitationsApi.acceptInvitation },
     { method: "GET", pattern: "/api/invitations", handler: invitationsApi.listInvitations },
     { method: "POST", pattern: "/api/invitations", handler: invitationsApi.createInvitation },
     { method: "POST", pattern: "/api/invitations/:id/revoke", handler: invitationsApi.revokeInvitation },
+    { method: "POST", pattern: "/api/invitations/:id/reissue", handler: invitationsApi.reissueInvitation },
 
     // Компания, филиалы, сотрудники
     { method: "GET", pattern: "/api/company", handler: orgApi.getCompany },
@@ -59,6 +64,10 @@ export const routes: Route[] = [
     { method: "PATCH", pattern: "/api/users/:id", handler: orgApi.updateUser },
     { method: "POST", pattern: "/api/users/:id/reset-code", handler: orgApi.issueResetCode },
     { method: "PUT", pattern: "/api/users/:id/admission", handler: orgApi.setAdmission },
+    { method: "GET", pattern: "/api/work-roles", handler: workRolesApi.listWorkRoles },
+    { method: "POST", pattern: "/api/work-roles", handler: workRolesApi.createWorkRole },
+    { method: "PATCH", pattern: "/api/work-roles/:id", handler: workRolesApi.updateWorkRole },
+    { method: "GET", pattern: "/api/access-log", handler: auditApi.accessLog },
 
     // Обучение
     { method: "GET", pattern: "/api/training/courses", handler: trainingApi.myCourses },
@@ -89,6 +98,8 @@ export const routes: Route[] = [
     { method: "GET", pattern: "/api/kpi/methodology", handler: analyticsApi.methodology },
     { method: "POST", pattern: "/api/kpi/methodology", handler: analyticsApi.saveMethodology },
     { method: "POST", pattern: "/api/kpi/methodology/:id/approve", handler: analyticsApi.approveMethodology },
+    { method: "POST", pattern: "/api/kpi/methodology/copy", handler: analyticsApi.copyMethodology },
+    { method: "POST", pattern: "/api/kpi/preview", handler: analyticsApi.previewMethodology },
     { method: "GET", pattern: "/api/kpi/report", handler: analyticsApi.kpiReport },
 
     // Интерфейс интеграции (Authorization: Bearer INTEGRATION_TOKEN)

@@ -18,6 +18,7 @@ required_migrations=(
   "0004_whatsapp.sql"
   "0005_whatsapp_studio.sql"
   "0006_remove_old_whatsapp.sql"
+  "0007_access_and_kpi.sql"
   "meta/_journal.json"
 )
 

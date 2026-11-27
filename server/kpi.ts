@@ -2,7 +2,7 @@
  * KPI: показатели с формулами из полей CRM, версии методики, расчёт отчёта.
  * Формула — последовательность блоков: поле, число, операция (+ − × ÷), скобка.
  */
-import { and, desc, eq, inArray, isNotNull, lte } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { kpiVersions } from "../db/schema.ts";
 import type { Db } from "./db.ts";
 import { AppError } from "./http.ts";
@@ -121,20 +121,47 @@ export function parseIndicators(input: unknown): Indicator[] {
 
 export type KpiVersionRow = typeof kpiVersions.$inferSelect;
 
-/** Действующая версия на конец периода: методика филиала, иначе общая */
-export async function effectiveVersion(db: Db, companyId: string, branchId: string | null, periodEnd: number): Promise<KpiVersionRow | null> {
-    const scopes = branchId ? [branchId, "company"] : ["company"];
+/** Область методики сотрудника: отдельная формула для конкретного человека */
+export const userScope = (userId: string) => `user:${userId}`;
+
+/** С какого момента версия действует: дата начала действия, иначе момент утверждения */
+export function versionStart(row: Pick<KpiVersionRow, "effectiveFrom" | "approvedAt">): number | null {
+    return row.effectiveFrom ?? row.approvedAt;
+}
+
+/** Все утверждённые версии нужных областей — одним запросом */
+export async function approvedVersions(db: Db, companyId: string, scopes: string[]): Promise<KpiVersionRow[]> {
+    if (!scopes.length) return [];
+    return db
+        .select()
+        .from(kpiVersions)
+        .where(and(eq(kpiVersions.companyId, companyId), inArray(kpiVersions.scope, [...new Set(scopes)]), eq(kpiVersions.status, "approved"), isNotNull(kpiVersions.approvedAt)))
+        .all();
+}
+
+/**
+ * Действующая версия на конец периода. Порядок: формула сотрудника → методика
+ * филиала → общая. Внутри области — версия с самой поздней датой начала, не позже конца периода.
+ */
+export function pickVersion(rows: KpiVersionRow[], target: { userId?: string | null; branchId: string | null }, periodEnd: number): KpiVersionRow | null {
+    const scopes = [target.userId ? userScope(target.userId) : null, target.branchId, "company"].filter((scope): scope is string => Boolean(scope));
     for (const scope of scopes) {
-        const row = await db
-            .select()
-            .from(kpiVersions)
-            .where(and(eq(kpiVersions.companyId, companyId), eq(kpiVersions.scope, scope), eq(kpiVersions.status, "approved"), isNotNull(kpiVersions.approvedAt), lte(kpiVersions.approvedAt, periodEnd)))
-            .orderBy(desc(kpiVersions.approvedAt), desc(kpiVersions.version))
-            .limit(1)
-            .get();
-        if (row) return row;
+        let best: KpiVersionRow | null = null;
+        for (const row of rows) {
+            const start = versionStart(row);
+            if (row.scope !== scope || start === null || start > periodEnd) continue;
+            const bestStart = best ? versionStart(best)! : -Infinity;
+            if (!best || start > bestStart || (start === bestStart && row.version > best.version)) best = row;
+        }
+        if (best) return best;
     }
     return null;
+}
+
+/** Действующая версия на конец периода для сотрудника (или филиала, или компании) */
+export async function effectiveVersion(db: Db, companyId: string, branchId: string | null, periodEnd: number, userId: string | null = null): Promise<KpiVersionRow | null> {
+    const scopes = [userId ? userScope(userId) : null, branchId, "company"].filter((scope): scope is string => Boolean(scope));
+    return pickVersion(await approvedVersions(db, companyId, scopes), { userId, branchId }, periodEnd);
 }
 
 export async function versionsFor(db: Db, companyId: string, scopes: string[]) {

@@ -78,6 +78,7 @@ export async function me(ctx: Ctx) {
             branchId: actor.branchId,
             branchName: ownBranch?.name ?? null,
             admitted: actor.admitted,
+            workRoleName: actor.workRoleName,
         },
         company: { id: company.id, name: company.name, timezone: company.timezone },
         branches: visibleBranches,

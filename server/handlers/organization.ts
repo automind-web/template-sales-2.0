@@ -1,6 +1,6 @@
 import { and, count, desc, eq, inArray, isNull, ne } from "drizzle-orm";
 import { companyConfig } from "../../config/company.ts";
-import { admissions, branches, companies, passwordResetCodes, users, type Role } from "../../db/schema.ts";
+import { admissions, branches, companies, passwordResetCodes, users, workRoles, type Role } from "../../db/schema.ts";
 import { canManageUser, loadCompanyBranch, resolveBranchScope } from "../access.ts";
 import { audit } from "../audit.ts";
 import { requireActor, requireRole, revokeAllSessions, type Actor } from "../auth.ts";
@@ -9,6 +9,7 @@ import { randomCode, sha256Hex } from "../crypto.ts";
 import { isUniqueViolation, newId } from "../db.ts";
 import { AppError, badRequest, bool, optStr, readJson, str } from "../http.ts";
 import { isValidTimezone } from "../validation.ts";
+import { loadActiveWorkRole } from "./work-roles.ts";
 
 // --- Компания ---
 
@@ -126,9 +127,12 @@ export async function listUsers(ctx: Ctx) {
             status: users.status,
             createdAt: users.createdAt,
             lastLoginAt: users.lastLoginAt,
+            workRoleId: users.workRoleId,
+            workRoleName: workRoles.name,
         })
         .from(users)
         .leftJoin(branches, eq(branches.id, users.branchId))
+        .leftJoin(workRoles, eq(workRoles.id, users.workRoleId))
         .where(and(...conditions))
         .orderBy(users.displayName)
         .all();
@@ -203,6 +207,13 @@ export async function updateUser(ctx: Ctx) {
         updates.role = role;
         updates.branchId = branchId;
     }
+    if ("workRoleId" in body) {
+        // Рабочую роль назначают директор и руководитель (своим сотрудникам); null — снять.
+        const value = body["workRoleId"];
+        if (value === null || value === "") updates.workRoleId = null;
+        else if (typeof value === "string") updates.workRoleId = (await loadActiveWorkRole(ctx, actor.companyId, value)).id;
+        else throw badRequest("validation.invalidInput", { workRoleId: "validation.invalidInput" });
+    }
     if ("status" in body) {
         const status = str(body, "status", { max: 20 });
         if (status !== "active" && status !== "disabled") throw badRequest("validation.invalidInput", { status: "validation.invalidInput" });
@@ -228,7 +239,7 @@ export async function updateUser(ctx: Ctx) {
             action: "user.update",
             entityType: "user",
             entityId: target.id,
-            data: { before: { role: target.role, branchId: target.branchId, status: target.status }, after: updates },
+            data: { before: { role: target.role, branchId: target.branchId, status: target.status, workRoleId: target.workRoleId }, after: updates },
         },
         ctx.now
     );

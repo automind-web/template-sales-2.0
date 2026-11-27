@@ -2,7 +2,7 @@ import type { MessageKey } from "../i18n/index.ts";
 import { badRequest, str } from "./http.ts";
 
 export const LOGIN_PATTERN = /^[a-z0-9._-]{3,32}$/;
-export const PASSWORD_MIN = 10;
+export const PASSWORD_MIN = 8;
 export const PASSWORD_MAX = 200;
 
 export function normalizeLogin(value: string): string {

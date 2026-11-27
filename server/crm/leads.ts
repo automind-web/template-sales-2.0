@@ -10,7 +10,7 @@
 import { and, asc, desc, eq, gte, inArray, isNull, lt, sql, type SQL } from "drizzle-orm";
 import type { FunnelConfig } from "../../config/company.ts";
 import { admissions, branches, leadEvents, leadOperations, leads, users } from "../../db/schema.ts";
-import { resolveBranchScope } from "../access.ts";
+import { canUseSection, resolveBranchScope } from "../access.ts";
 import type { Actor } from "../auth.ts";
 import type { Ctx } from "../context.ts";
 import { isUniqueViolation, newId, type Db } from "../db.ts";
@@ -25,8 +25,8 @@ export const LIMITS = { name: 120, phone: 32, company: 120, lostReason: 300, com
 // --- Права ---------------------------------------------------------------
 
 export function requireCrm(actor: Actor) {
-    // Сотрудник — только после допуска; руководитель и директор — всегда.
-    if (!actor.admitted) throw new AppError(403, "shell.sectionLocked");
+    // Сотрудник — только после обучения; рабочая роль может закрыть CRM (кроме директора).
+    if (!canUseSection(actor, "crm")) throw new AppError(403, "shell.sectionLocked");
 }
 
 export async function canSeeLead(db: Db, actor: Actor, lead: LeadRow): Promise<boolean> {

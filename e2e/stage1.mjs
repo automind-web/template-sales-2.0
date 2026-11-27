@@ -49,7 +49,7 @@ assert(activationUrl.includes("/activate/"), "приглашение дирек�
 // Директор: ошибка формы не гасит ссылку
 const dir = await ctx();
 await register(dir.p, activationUrl, "Айгерим Директорова", "aigerim", "short");
-await dir.p.getByText("Пароль должен быть не короче 10 символов.").first().waitFor();
+await dir.p.getByText("Пароль должен быть не короче 8 символов.").first().waitFor();
 await register(dir.p, activationUrl, "Айгерим Директорова", "aigerim", "director-pass-1");
 await dir.p.waitForURL(BASE + "/"); await hydrated(dir.p);
 await dir.p.getByText("Первые шаги").waitFor();
@@ -102,11 +102,11 @@ await mgr.p.waitForURL(BASE + "/"); await hydrated(mgr.p);
 await mgr.p.getByText("Дела на сегодня").waitFor();
 log("ok: руководитель зарегистрирован и видит главную");
 
-// Руководитель: в настройках только участники и приглашения своего филиала
+// Руководитель: в настройках участники, приглашения и журнал прав своего филиала
 await mgr.p.getByRole("link", { name: "Настройки системы" }).click();
 await mgr.p.getByRole("tab", { name: "Сотрудники" }).waitFor();
 const tabs = await mgr.p.getByRole("tab").allTextContents();
-assert(JSON.stringify(tabs) === JSON.stringify(["Сотрудники", "Приглашения"]), "вкладки руководителя: " + tabs.join(", "));
+assert(JSON.stringify(tabs) === JSON.stringify(["Сотрудники", "Приглашения", "Журнал прав"]), "вкладки руководителя: " + tabs.join(", "));
 await mgr.p.getByRole("tab", { name: "Приглашения" }).click();
 assert(await mgr.p.getByLabel("Роль").isDisabled(), "руководитель приглашает только сотрудников");
 await mgr.p.getByLabel("Кому (подсказка имени)").fill("Новый сотрудник");
