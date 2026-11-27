@@ -1,6 +1,6 @@
 import { and, desc, eq, gt, isNull } from "drizzle-orm";
 import { branches, companies, passwordResetCodes, sessions, users } from "../../db/schema.ts";
-import { canUseSection, loadCompanyBranch, sectionMap, singleBranchId } from "../access.ts";
+import { canUseSection, loadCompanyBranch, sectionMap } from "../access.ts";
 import { audit } from "../audit.ts";
 import { clearSessionCookie, createSession, loadActor, requireActor, revokeAllSessions } from "../auth.ts";
 import type { Ctx } from "../context.ts";
@@ -46,34 +46,28 @@ export async function logout(ctx: Ctx) {
 
 export async function me(ctx: Ctx) {
     const actor = await requireActor(ctx);
-    const company = await ctx.db.select().from(companies).where(eq(companies.id, actor.companyId)).get();
-    if (!company) throw new AppError(500, "error.internal");
-
     const branchConditions = [eq(branches.companyId, actor.companyId), isNull(branches.archivedAt)];
     if (actor.role !== "director" && actor.branchId) branchConditions.push(eq(branches.id, actor.branchId));
-    const visibleBranches =
+    // Независимые чтения — параллельно: на хостинге каждое обращение к базе — сетевая поездка.
+    const [company, visibleBranches, ownBranch] = await Promise.all([
+        ctx.db.select().from(companies).where(eq(companies.id, actor.companyId)).get(),
         actor.role === "director" || actor.branchId
-            ? await ctx.db
-                  .select({ id: branches.id, name: branches.name, city: branches.city })
-                  .from(branches)
-                  .where(and(...branchConditions))
-                  .orderBy(branches.name)
-                  .all()
-            : [];
+            ? ctx.db.select({ id: branches.id, name: branches.name, city: branches.city }).from(branches).where(and(...branchConditions)).orderBy(branches.name).all()
+            : Promise.resolve([]),
+        actor.branchId ? ctx.db.select({ name: branches.name }).from(branches).where(eq(branches.id, actor.branchId)).get() : Promise.resolve(undefined),
+    ]);
+    if (!company) throw new AppError(500, "error.internal");
 
     let selectedBranchId: string | null;
     if (actor.role === "director") {
-        const single = await singleBranchId(ctx, actor.companyId);
+        // Единственный действующий филиал выбирается сам (как singleBranchId).
+        const single = visibleBranches.length === 1 ? visibleBranches[0]!.id : null;
         const stored = actor.selectedBranchId;
         const storedIsValid = stored === "*" || visibleBranches.some((branch) => branch.id === stored);
         selectedBranchId = single ?? (storedIsValid ? stored : "*");
     } else {
         selectedBranchId = actor.branchId;
     }
-
-    const ownBranch = actor.branchId
-        ? await ctx.db.select({ name: branches.name }).from(branches).where(eq(branches.id, actor.branchId)).get()
-        : undefined;
 
     return {
         user: {
@@ -110,7 +104,9 @@ export async function selectBranch(ctx: Ctx) {
     const branchId = str(body, "branchId", { max: 64 });
     if (branchId !== "*") await loadCompanyBranch(ctx, actor, branchId);
     await ctx.db.update(sessions).set({ selectedBranchId: branchId }).where(eq(sessions.id, actor.sessionId));
-    return { ok: true, selectedBranchId: branchId };
+    // Сразу возвращаем обновлённый профиль: клиенту не нужен второй запрос /api/me.
+    ctx.actor = { ...actor, selectedBranchId: branchId };
+    return { ok: true, selectedBranchId: branchId, me: await me(ctx) };
 }
 
 export async function sectionCheck(ctx: Ctx) {

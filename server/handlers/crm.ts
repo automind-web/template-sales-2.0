@@ -18,22 +18,28 @@ async function companyTimezone(ctx: Ctx, actor: Actor): Promise<string> {
 export async function crmConfig(ctx: Ctx) {
     const actor = await requireActor(ctx);
     const branchId = await crmBranch(ctx, actor, ctx.url.searchParams.get("branchId"));
-    const branch = await ctx.db.select({ id: branches.id, name: branches.name }).from(branches).where(eq(branches.id, branchId)).get();
+    const [branch, funnel, owners, seeBranch, timezone] = await Promise.all([
+        ctx.db.select({ id: branches.id, name: branches.name }).from(branches).where(eq(branches.id, branchId)).get(),
+        getFunnel(ctx.db, actor.companyId),
+        assignableOwners(ctx.db, branchId),
+        employeesSeeBranch(ctx.db, actor.companyId),
+        companyTimezone(ctx, actor),
+    ]);
     return {
         branch,
-        funnel: await getFunnel(ctx.db, actor.companyId),
-        owners: await assignableOwners(ctx.db, branchId),
+        funnel,
+        owners,
         canAssign: actor.role !== "employee",
-        ownOnly: actor.role === "employee" && !(await employeesSeeBranch(ctx.db, actor.companyId)),
+        ownOnly: actor.role === "employee" && !seeBranch,
         currency: companyConfig.currency,
-        timezone: await companyTimezone(ctx, actor),
+        timezone,
     };
 }
 
 export async function crmList(ctx: Ctx) {
     const actor = await requireActor(ctx);
-    const branchId = await crmBranch(ctx, actor, ctx.url.searchParams.get("branchId"));
-    return listLeads(ctx, actor, branchId, parseFilters(ctx.url.searchParams), await companyTimezone(ctx, actor));
+    const [branchId, timezone] = await Promise.all([crmBranch(ctx, actor, ctx.url.searchParams.get("branchId")), companyTimezone(ctx, actor)]);
+    return listLeads(ctx, actor, branchId, parseFilters(ctx.url.searchParams), timezone);
 }
 
 function csvCell(value: string | number | null): string {
@@ -80,12 +86,12 @@ export async function crmExport(ctx: Ctx) {
 async function detail(ctx: Ctx, actor: Actor, leadId: string) {
     const lead = await loadLead(ctx, actor, leadId);
     const funnel = await getFunnel(ctx.db, actor.companyId);
-    const [view] = await toViews(ctx.db, [lead], funnel, ctx.now);
+    const [[view], history, owners] = await Promise.all([toViews(ctx.db, [lead], funnel, ctx.now), leadHistory(ctx.db, lead.id), assignableOwners(ctx.db, lead.branchId)]);
     return {
         lead: view,
-        history: await leadHistory(ctx.db, lead.id),
+        history,
         funnel,
-        owners: await assignableOwners(ctx.db, lead.branchId),
+        owners,
         canAssign: actor.role !== "employee",
         currency: companyConfig.currency,
     };

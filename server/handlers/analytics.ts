@@ -46,7 +46,11 @@ function readPeriod(params: URLSearchParams, timezone: string, now: number): { f
  */
 async function resolveScope(ctx: Ctx, actor: Actor, forEmployeeSelf: boolean): Promise<Scope> {
     const params = ctx.url.searchParams;
-    const timezone = await timezoneOf(ctx, actor);
+    // Часовой пояс и права на филиал — параллельно.
+    const [timezone, branchScope] = await Promise.all([
+        timezoneOf(ctx, actor),
+        forEmployeeSelf ? Promise.resolve(null) : resolveBranchScope(ctx, actor, params.get("branchId"), { allowAll: true }),
+    ]);
     const period = readPeriod(params, timezone, ctx.now);
     const bounds = periodBounds(timezone, period.from, period.to);
     let branchIds: string[] | "all";
@@ -56,7 +60,7 @@ async function resolveScope(ctx: Ctx, actor: Actor, forEmployeeSelf: boolean): P
         branchIds = [actor.branchId];
         ownerUserId = actor.userId;
     } else {
-        const scope = await resolveBranchScope(ctx, actor, params.get("branchId"), { allowAll: true });
+        const scope = branchScope!;
         branchIds = scope.kind === "all" ? "all" : [scope.branchId];
         const userId = params.get("userId");
         if (userId) {
@@ -65,8 +69,12 @@ async function resolveScope(ctx: Ctx, actor: Actor, forEmployeeSelf: boolean): P
             ownerUserId = user.id;
         }
     }
-    const branchName = branchIds === "all" ? null : ((await ctx.db.select({ name: branches.name }).from(branches).where(eq(branches.id, branchIds[0]!)).get())?.name ?? null);
-    const userName = ownerUserId ? ((await ctx.db.select({ name: users.displayName }).from(users).where(eq(users.id, ownerUserId)).get())?.name ?? null) : null;
+    const [branchRow, userRow] = await Promise.all([
+        branchIds === "all" ? Promise.resolve(undefined) : ctx.db.select({ name: branches.name }).from(branches).where(eq(branches.id, branchIds[0]!)).get(),
+        ownerUserId ? ctx.db.select({ name: users.displayName }).from(users).where(eq(users.id, ownerUserId)).get() : Promise.resolve(undefined),
+    ]);
+    const branchName = branchRow?.name ?? null;
+    const userName = userRow?.name ?? null;
     return {
         filter: { companyId: actor.companyId, branchIds, ownerUserId, from: bounds.from, to: bounds.to, now: ctx.now },
         timezone,
@@ -85,10 +93,12 @@ async function peopleInScope(ctx: Ctx, actor: Actor, scope: Scope, extraIds: str
     const active = await ctx.db.select({ id: users.id, name: users.displayName, branchId: users.branchId }).from(users).where(and(...conditions)).all();
     const known = new Set(active.map((row) => row.id));
     const missing = extraIds.filter((id) => id !== NO_OWNER && !known.has(id));
-    const others = missing.length ? await ctx.db.select({ id: users.id, name: users.displayName, branchId: users.branchId }).from(users).where(inArray(users.id, missing)).all() : [];
+    // Названия филиалов компании берём одним запросом параллельно с недостающими людьми.
+    const [others, branchRows] = await Promise.all([
+        missing.length ? ctx.db.select({ id: users.id, name: users.displayName, branchId: users.branchId }).from(users).where(inArray(users.id, missing)).all() : Promise.resolve([]),
+        ctx.db.select({ id: branches.id, name: branches.name }).from(branches).where(eq(branches.companyId, actor.companyId)).all(),
+    ]);
     const all = [...active, ...others];
-    const branchIds = [...new Set(all.map((row) => row.branchId).filter((id): id is string => Boolean(id)))];
-    const branchRows = branchIds.length ? await ctx.db.select({ id: branches.id, name: branches.name }).from(branches).where(inArray(branches.id, branchIds)).all() : [];
     const names = new Map(branchRows.map((row) => [row.id, row.name]));
     return all.map((row) => ({ ...row, branchName: row.branchId ? (names.get(row.branchId) ?? null) : null }));
 }
@@ -105,8 +115,7 @@ function derived(values: MetricValues) {
 export async function stats(ctx: Ctx) {
     const actor = await requireActor(ctx);
     requireSection(actor, "stats");
-    const scope = await resolveScope(ctx, actor, false);
-    const funnel = await getFunnel(ctx.db, actor.companyId);
+    const [scope, funnel] = await Promise.all([resolveScope(ctx, actor, false), getFunnel(ctx.db, actor.companyId)]);
     const { totals, byOwner } = await computeMetrics(ctx.db, scope.filter, funnel);
     const people = await peopleInScope(ctx, actor, scope, [...byOwner.keys()]);
     const rows = people.map((person) => {
@@ -222,19 +231,20 @@ export async function kpiReport(ctx: Ctx) {
     const actor = await requireActor(ctx);
     requireSection(actor, "kpi");
     const self = actor.role === "employee";
-    const scope = await resolveScope(ctx, actor, self);
-    const funnel = await getFunnel(ctx.db, actor.companyId);
-    const { byOwner } = await computeMetrics(ctx.db, scope.filter, funnel);
-    const people = self
-        ? [{ id: actor.userId, name: actor.displayName, branchId: actor.branchId, branchName: scope.branchName }]
-        : (await peopleInScope(ctx, actor, scope, [])).filter((person) => !scope.filter.ownerUserId || person.id === scope.filter.ownerUserId);
+    const [scope, funnel] = await Promise.all([resolveScope(ctx, actor, self), getFunnel(ctx.db, actor.companyId)]);
+    const [{ byOwner }, peopleRows] = await Promise.all([
+        computeMetrics(ctx.db, scope.filter, funnel),
+        self ? Promise.resolve([{ id: actor.userId, name: actor.displayName, branchId: actor.branchId, branchName: scope.branchName }]) : peopleInScope(ctx, actor, scope, []),
+    ]);
+    const people = peopleRows.filter((person) => self || !scope.filter.ownerUserId || person.id === scope.filter.ownerUserId);
 
-    const versionCache = new Map<string, Awaited<ReturnType<typeof effectiveVersion>>>();
+    // Действующие версии методики — по одной на филиал, все сразу.
+    const branchKeys = [...new Set(people.map((person) => person.branchId ?? null))];
+    const versions = await Promise.all(branchKeys.map((branchId) => effectiveVersion(ctx.db, actor.companyId, branchId, scope.filter.to)));
+    const versionCache = new Map(branchKeys.map((branchId, index) => [branchId ?? "company", versions[index]]));
     const rows = [];
     for (const person of people) {
-        const key = person.branchId ?? "company";
-        if (!versionCache.has(key)) versionCache.set(key, await effectiveVersion(ctx.db, actor.companyId, person.branchId, scope.filter.to));
-        const version = versionCache.get(key) ?? null;
+        const version = versionCache.get(person.branchId ?? "company") ?? null;
         const values = byOwner.get(person.id) ?? emptyValues();
         rows.push({
             userId: person.id,

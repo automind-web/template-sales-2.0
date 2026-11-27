@@ -76,8 +76,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
     const selectBranch = useCallback(
         async (branchId: string) => {
-            await api("/api/me/branch", { method: "PUT", body: { branchId } });
-            await reload();
+            const result = await api<{ me?: Me }>("/api/me/branch", { method: "PUT", body: { branchId } });
+            if (result.me) setMe(result.me);
+            else await reload();
         },
         [reload]
     );

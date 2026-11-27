@@ -26,6 +26,7 @@ const MAIN_NAV: NavItem[] = [
 const BOTTOM_NAV: NavItem[] = [{ section: "settings", href: "/settings", label: "nav.settings", icon: Settings }];
 
 type NavStatus = { overdue: number; whatsapp: "on" | "off" | null };
+let navStatusCache: { at: number; scope: string; value: NavStatus } | null = null;
 
 const ShellContext = createContext<{ openMenu: () => void }>({ openMenu: () => {} });
 
@@ -80,12 +81,18 @@ function initials(name: string) {
 function Sidebar({ onNavigate, closeSpace = false }: { onNavigate: () => void; closeSpace?: boolean }) {
     const { me } = useSession();
     const pathname = usePathname() ?? "/";
-    const [status, setStatus] = useState<NavStatus | null>(null);
+    const [status, setStatus] = useState<NavStatus | null>(() => navStatusCache?.value ?? null);
     const gated = me.user.role === "employee" && !me.user.admitted;
     useEffect(() => {
         if (gated) return;
+        // Отметки меню обновляются не чаще раза в 20 секунд (и сразу при смене филиала), а не на каждом переходе.
+        const scope = me.selectedBranchId ?? "";
+        if (navStatusCache && navStatusCache.scope === scope && Date.now() - navStatusCache.at < 20_000) return;
         const controller = new AbortController();
-        api<NavStatus>("/api/nav-status", { signal: controller.signal }).then(setStatus, () => undefined);
+        api<NavStatus>("/api/nav-status", { signal: controller.signal }).then((value) => {
+            navStatusCache = { at: Date.now(), scope, value };
+            setStatus(value);
+        }, () => undefined);
         return () => controller.abort();
     }, [pathname, gated, me.selectedBranchId]);
     const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`));

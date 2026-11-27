@@ -1,4 +1,4 @@
-import { and, eq, isNull, ne } from "drizzle-orm";
+import { and, eq, isNull, ne, sql } from "drizzle-orm";
 import { companyConfig } from "../config/company.ts";
 import { admissions, sessions, users, type Role } from "../db/schema.ts";
 import type { Ctx } from "./context.ts";
@@ -45,6 +45,8 @@ export async function loadActor(ctx: Ctx): Promise<Actor | null> {
             displayName: users.displayName,
             login: users.login,
             status: users.status,
+            // Отметка «Прошёл обучение» — в том же запросе, без отдельного обращения к базе.
+            hasAdmission: sql<number>`exists (select 1 from ${admissions} where ${admissions.userId} = ${users.id} and ${admissions.revokedAt} is null)`,
         })
         .from(sessions)
         .innerJoin(users, eq(users.id, sessions.userId))
@@ -56,19 +58,13 @@ export async function loadActor(ctx: Ctx): Promise<Actor | null> {
         return null;
     }
 
-    let admitted = row.role !== "employee";
-    if (!admitted) {
-        const admission = await ctx.db
-            .select({ id: admissions.id })
-            .from(admissions)
-            .where(and(eq(admissions.userId, row.userId), isNull(admissions.revokedAt)))
-            .limit(1)
-            .get();
-        admitted = Boolean(admission);
-    }
+    const admitted = row.role !== "employee" || Boolean(row.hasAdmission);
 
     if (ctx.now - row.lastSeenAt > LAST_SEEN_THROTTLE_MS) {
-        await ctx.db.update(sessions).set({ lastSeenAt: ctx.now }).where(eq(sessions.id, sessionId));
+        // Отметка «был в сети» не задерживает ответ: пишется в фоне после него.
+        const touch = ctx.db.update(sessions).set({ lastSeenAt: ctx.now }).where(eq(sessions.id, sessionId)).then(() => undefined);
+        if (ctx.waitUntil) ctx.waitUntil(touch.catch(() => undefined));
+        else await touch;
     }
 
     ctx.actor = {

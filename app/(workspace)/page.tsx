@@ -43,7 +43,7 @@ function useCountUp(target: number) {
         const start = performance.now();
         let frame = 0;
         const tick = (time: number) => {
-            const progress = Math.min(1, (time - start) / 700);
+            const progress = Math.min(1, (time - start) / 450);
             setValue(Math.round(target * (1 - Math.pow(1 - progress, 3))));
             if (progress < 1) frame = requestAnimationFrame(tick);
         };
@@ -76,7 +76,7 @@ function LeadRow({ lead, funnel, timezone, now }: { lead: Lead; funnel: FunnelCo
     const due = dueLabel(lead, timezone, now);
     return (
         <li>
-            <Link href={`/crm/${lead.id}`} className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-muted">
+            <Link href={`/crm/${lead.id}`} prefetch={false} className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-muted">
                 <span className={cn("grid size-9 shrink-0 place-items-center rounded-full text-sm font-bold", lead.source === "whatsapp" ? "bg-[#25d366]/15 text-[#128c4b]" : "bg-primary/10 text-primary")}>
                     {lead.source === "whatsapp" ? <MessageCircle className="size-4" /> : lead.clientName.slice(0, 1).toUpperCase()}
                 </span>

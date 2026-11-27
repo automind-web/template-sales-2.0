@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
-import { admissionRules, admissions, branches, courses, courseVersions, lessonProgress, testAttempts, trainingFiles, users } from "../../db/schema.ts";
+import { admissionRules, admissions, branches, courseAssignments, courses, courseVersions, lessonProgress, testAttempts, trainingFiles, users } from "../../db/schema.ts";
 import { resolveBranchScope } from "../access.ts";
 import { audit } from "../audit.ts";
 import { requireActor, requireRole, type Actor } from "../auth.ts";
@@ -86,18 +86,24 @@ async function attemptSummaries(ctx: Ctx, userIds: string[], courseIds: string[]
 
 export async function myCourses(ctx: Ctx) {
     const actor = await requireActor(ctx);
-    await ensureProgram(ctx.db, actor.companyId, ctx.now);
     const user = { id: actor.userId, companyId: actor.companyId, role: actor.role, branchId: actor.branchId };
-    const rules = await companyRules(ctx.db, actor.companyId);
+    const [, rules] = await Promise.all([ensureProgram(ctx.db, actor.companyId, ctx.now), companyRules(ctx.db, actor.companyId)]);
     const assigned = await assignedCourseIds(ctx.db, user, rules);
     const ids = [...assigned.keys()];
-    const courseRows = ids.length ? await ctx.db.select().from(courses).where(inArray(courses.id, ids)).orderBy(courses.title).all() : [];
-    const done = await completedLessons(ctx, actor.userId, ids);
-    const attempts = await attemptSummaries(ctx, [actor.userId], ids);
+    // Курсы, уроки, попытки, версии и правила допуска — одной волной параллельных запросов.
+    const [courseRows, done, attempts, versionRows, evaluation] = await Promise.all([
+        ids.length ? ctx.db.select().from(courses).where(inArray(courses.id, ids)).orderBy(courses.title).all() : Promise.resolve([]),
+        completedLessons(ctx, actor.userId, ids),
+        attemptSummaries(ctx, [actor.userId], ids),
+        ids.length ? ctx.db.select().from(courseVersions).where(inArray(courseVersions.courseId, ids)).orderBy(desc(courseVersions.version)).all() : Promise.resolve([]),
+        evaluateRules(ctx.db, user),
+    ]);
+    const latestByCourse = new Map<string, (typeof versionRows)[number]>();
+    for (const row of versionRows) if (!latestByCourse.has(row.courseId)) latestByCourse.set(row.courseId, row);
 
     const items = [];
     for (const course of courseRows) {
-        const version = await latestVersion(ctx.db, course.id);
+        const version = latestByCourse.get(course.id);
         if (!version) continue;
         const content = parseStoredContent(version.content);
         const own = attempts.filter((attempt) => attempt.courseId === course.id);
@@ -121,7 +127,6 @@ export async function myCourses(ctx: Ctx) {
             openAttempt: open ? { id: open.id, version: open.version } : null,
         });
     }
-    const evaluation = await evaluateRules(ctx.db, user);
     return {
         courses: items,
         admission: {
@@ -379,8 +384,7 @@ export async function downloadFile(ctx: Ctx) {
 export async function teamProgress(ctx: Ctx) {
     const actor = await requireActor(ctx);
     if (!isStaff(actor)) throw new AppError(403, "auth.forbidden");
-    await ensureProgram(ctx.db, actor.companyId, ctx.now);
-    const scope = await resolveBranchScope(ctx, actor, ctx.url.searchParams.get("branchId"), { allowAll: true });
+    const [, scope] = await Promise.all([ensureProgram(ctx.db, actor.companyId, ctx.now), resolveBranchScope(ctx, actor, ctx.url.searchParams.get("branchId"), { allowAll: true })]);
     const conditions = [eq(users.companyId, actor.companyId), eq(users.role, "employee"), eq(users.status, "active")];
     if (scope.kind === "one") conditions.push(eq(users.branchId, scope.branchId));
     const people = await ctx.db
@@ -390,45 +394,69 @@ export async function teamProgress(ctx: Ctx) {
         .where(and(...conditions))
         .orderBy(users.displayName)
         .all();
-    const rules = await companyRules(ctx.db, actor.companyId);
-    const admittedIds = new Set(
-        people.length
-            ? (
-                  await ctx.db
-                      .select({ userId: admissions.userId })
-                      .from(admissions)
-                      .where(and(inArray(admissions.userId, people.map((person) => person.id)), isNull(admissions.revokedAt)))
-                      .all()
-              ).map((row) => row.userId)
-            : []
-    );
-    const versionCache = new Map<string, { title: string; version: number; content: CourseContent } | null>();
+    if (!people.length) return { employees: [] };
+    const userIds = people.map((person) => person.id);
+    // Всё для всех сотрудников сразу: постоянное число обращений к базе, сколько бы людей ни было в команде.
+    const [rules, admittedRows, companyCourses, assignments] = await Promise.all([
+        companyRules(ctx.db, actor.companyId),
+        ctx.db.select({ userId: admissions.userId }).from(admissions).where(and(inArray(admissions.userId, userIds), isNull(admissions.revokedAt))).all(),
+        ctx.db.select({ id: courses.id, key: courses.key, archivedAt: courses.archivedAt }).from(courses).where(eq(courses.companyId, actor.companyId)).all(),
+        ctx.db
+            .select({ courseId: courseAssignments.courseId, scope: courseAssignments.scope, branchId: courseAssignments.branchId, userId: courseAssignments.userId })
+            .from(courseAssignments)
+            .where(and(eq(courseAssignments.companyId, actor.companyId), isNull(courseAssignments.removedAt)))
+            .all(),
+    ]);
+    const admittedIds = new Set(admittedRows.map((row) => row.userId));
+    const courseByKey = new Map(companyCourses.map((course) => [course.key, course]));
+    const liveCourseIds = companyCourses.filter((course) => course.archivedAt === null).map((course) => course.id);
+    const [versionRows, progressRows, attempts] = await Promise.all([
+        liveCourseIds.length ? ctx.db.select().from(courseVersions).where(inArray(courseVersions.courseId, liveCourseIds)).orderBy(desc(courseVersions.version)).all() : Promise.resolve([]),
+        liveCourseIds.length
+            ? ctx.db.select({ userId: lessonProgress.userId, courseId: lessonProgress.courseId, lessonKey: lessonProgress.lessonKey }).from(lessonProgress).where(inArray(lessonProgress.userId, userIds)).all()
+            : Promise.resolve([]),
+        attemptSummaries(ctx, userIds, liveCourseIds),
+    ]);
+    // Последняя версия каждого курса (строки уже отсортированы по убыванию версии)
+    const latest = new Map<string, { title: string; version: number; content: CourseContent }>();
+    for (const row of versionRows) if (!latest.has(row.courseId)) latest.set(row.courseId, { title: row.title, version: row.version, content: parseStoredContent(row.content) });
+    const done = new Map<string, Set<string>>();
+    for (const row of progressRows) {
+        const key = `${row.userId}:${row.courseId}`;
+        if (!done.has(key)) done.set(key, new Set());
+        done.get(key)!.add(row.lessonKey);
+    }
+
     const rows = [];
     for (const person of people) {
-        const assigned = await assignedCourseIds(ctx.db, { id: person.id, companyId: actor.companyId, role: "employee", branchId: person.branchId }, rules);
-        const ids = [...assigned.keys()];
-        const done = await completedLessons(ctx, person.id, ids);
-        const attempts = await attemptSummaries(ctx, [person.id], ids);
-        const evaluation = await evaluateRules(ctx.db, { id: person.id, companyId: actor.companyId, role: "employee", branchId: person.branchId });
+        const applicable = rulesForBranch(rules, person.branchId);
+        // Курсы человека: из правил допуска его филиала и явные назначения (как assignedCourseIds)
+        const assigned = new Map<string, number | null>();
+        for (const item of assignments) {
+            if ((item.scope === "user" && item.userId === person.id) || item.scope === "company" || (item.scope === "branch" && item.branchId === person.branchId)) assigned.set(item.courseId, null);
+        }
+        for (const rule of applicable) {
+            const course = courseByKey.get(rule.courseKey);
+            if (course) assigned.set(course.id, rule.minScorePercent);
+        }
+        const own = attempts.filter((attempt) => attempt.userId === person.id);
+        const bestFor = (courseId: string) =>
+            own.filter((attempt) => attempt.courseId === courseId && attempt.status === "submitted").reduce<number | null>((max, attempt) => (attempt.scorePercent !== null && (max === null || attempt.scorePercent > max) ? attempt.scorePercent : max), null);
         const coursesInfo = [];
-        for (const courseId of ids) {
-            if (!versionCache.has(courseId)) {
-                const version = await latestVersion(ctx.db, courseId);
-                versionCache.set(courseId, version ? { title: version.title, version: version.version, content: parseStoredContent(version.content) } : null);
-            }
-            const version = versionCache.get(courseId);
+        for (const [courseId, requiredMin] of assigned) {
+            const version = latest.get(courseId);
             if (!version) continue;
-            const own = attempts.filter((attempt) => attempt.courseId === courseId);
-            const submitted = own.filter((attempt) => attempt.status === "submitted");
-            const best = submitted.reduce<number | null>((max, attempt) => (attempt.scorePercent !== null && (max === null || attempt.scorePercent > max) ? attempt.scorePercent : max), null);
+            const mine = own.filter((attempt) => attempt.courseId === courseId);
+            const submitted = mine.filter((attempt) => attempt.status === "submitted");
+            const best = bestFor(courseId);
             const last = submitted[0] ?? null;
-            const minScore = assigned.get(courseId)?.requiredMin ?? version.content.test.passPercent;
+            const minScore = requiredMin ?? version.content.test.passPercent;
             coursesInfo.push({
                 courseId,
                 title: version.title,
-                lessons: progressFor(version.content, done.get(courseId) ?? new Set()),
+                lessons: progressFor(version.content, done.get(`${person.id}:${courseId}`) ?? new Set()),
                 attempts: submitted.length,
-                inProgress: own.some((attempt) => attempt.status === "in_progress"),
+                inProgress: mine.some((attempt) => attempt.status === "in_progress"),
                 bestPercent: best,
                 lastPercent: last?.scorePercent ?? null,
                 lastSubmittedAt: last?.submittedAt ?? null,
@@ -437,6 +465,11 @@ export async function teamProgress(ctx: Ctx) {
                 passed: best !== null && best >= minScore,
             });
         }
+        const evaluation = applicable.map((rule) => {
+            const course = courseByKey.get(rule.courseKey);
+            const best = course ? bestFor(course.id) : null;
+            return { courseKey: rule.courseKey, minScorePercent: rule.minScorePercent, bestPercent: best, satisfied: best !== null && best >= rule.minScorePercent, courseAvailable: Boolean(course) };
+        });
         rows.push({ ...person, admitted: admittedIds.has(person.id), courses: coursesInfo, rules: evaluation });
     }
     return { employees: rows };

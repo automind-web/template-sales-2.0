@@ -162,9 +162,11 @@ async function namesFor(db: Db, ids: Array<string | null>) {
 }
 
 export async function toViews(db: Db, rows: LeadRow[], funnel: FunnelConfig, now: number): Promise<LeadView[]> {
-    const names = await namesFor(db, rows.map((row) => row.ownerUserId));
     const branchIds = [...new Set(rows.map((row) => row.branchId))];
-    const branchRows = branchIds.length ? await db.select({ id: branches.id, name: branches.name }).from(branches).where(inArray(branches.id, branchIds)).all() : [];
+    const [names, branchRows] = await Promise.all([
+        namesFor(db, rows.map((row) => row.ownerUserId)),
+        branchIds.length ? db.select({ id: branches.id, name: branches.name }).from(branches).where(inArray(branches.id, branchIds)).all() : Promise.resolve([]),
+    ]);
     const branchNames = new Map(branchRows.map((row) => [row.id, row.name]));
     return rows.map((row) => ({
         id: row.id,
@@ -236,23 +238,25 @@ export async function listLeads(ctx: Ctx, actor: Actor, branchId: string, filter
     if (filters.due === "week") base.push(and(gte(leads.nextContactAt, todayBounds(timeZone, ctx.now).from), lt(leads.nextContactAt, ctx.now + 7 * 86_400_000))!);
     if (filters.due === "none") base.push(isNull(leads.nextContactAt), open);
 
-    const countRows = await ctx.db
-        .select({ stage: leads.stage, total: sql<number>`count(*)` })
-        .from(leads)
-        .where(and(...base))
-        .groupBy(leads.stage)
-        .all();
-    const counts = Object.fromEntries(funnel.stages.map((stage) => [stage.key, Number(countRows.find((row) => row.stage === stage.key)?.total ?? 0)]));
-
     const conditions = [...base];
     if (filters.stages.length) conditions.push(inArray(leads.stage, filters.stages));
-    const rows = await ctx.db
-        .select()
-        .from(leads)
-        .where(and(...conditions))
-        .orderBy(sql`${leads.closedAt} IS NOT NULL`, sql`${leads.nextContactAt} IS NULL`, asc(leads.nextContactAt), desc(leads.number))
-        .limit(1000)
-        .all();
+    // Количество по этапам и сами заявки — параллельно.
+    const [countRows, rows] = await Promise.all([
+        ctx.db
+            .select({ stage: leads.stage, total: sql<number>`count(*)` })
+            .from(leads)
+            .where(and(...base))
+            .groupBy(leads.stage)
+            .all(),
+        ctx.db
+            .select()
+            .from(leads)
+            .where(and(...conditions))
+            .orderBy(sql`${leads.closedAt} IS NOT NULL`, sql`${leads.nextContactAt} IS NULL`, asc(leads.nextContactAt), desc(leads.number))
+            .limit(1000)
+            .all(),
+    ]);
+    const counts = Object.fromEntries(funnel.stages.map((stage) => [stage.key, Number(countRows.find((row) => row.stage === stage.key)?.total ?? 0)]));
     return { funnel, counts, total: rows.length, leads: await toViews(ctx.db, rows, funnel, ctx.now) };
 }
 

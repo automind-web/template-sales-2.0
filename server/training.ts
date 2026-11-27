@@ -2,11 +2,12 @@
  * Обучение: содержимое редакций, подсчёт результата теста, назначенные курсы
  * и применение правил допуска. Используется обработчиками API и интеграцией.
  */
-import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { companyConfig } from "../config/company.ts";
 import { admissionRules, admissions, companySettings, courseAssignments, courses, courseVersions, testAttempts, users } from "../db/schema.ts";
 import { newId, type Db } from "./db.ts";
 import { AppError } from "./http.ts";
+import { invalidateSettings, readSetting } from "./settings-store.ts";
 
 // --- Содержимое редакции -------------------------------------------------
 
@@ -149,12 +150,8 @@ export type EffectiveRule = { courseKey: string; minScorePercent: number; branch
 const RULES_CUSTOMIZED_KEY = "admissionRules.customized";
 
 export async function rulesCustomized(db: Db, companyId: string): Promise<boolean> {
-    const row = await db
-        .select({ value: companySettings.value })
-        .from(companySettings)
-        .where(and(eq(companySettings.companyId, companyId), eq(companySettings.key, RULES_CUSTOMIZED_KEY)))
-        .get();
-    return row?.value === "1";
+    // Значение хранится как «1»; читается через общий кэш настроек запроса.
+    return (await readSetting<unknown>(db, companyId, RULES_CUSTOMIZED_KEY)) == 1;
 }
 
 export async function markRulesCustomized(db: Db, companyId: string, userId: string, now: number) {
@@ -162,6 +159,7 @@ export async function markRulesCustomized(db: Db, companyId: string, userId: str
         .insert(companySettings)
         .values({ companyId, key: RULES_CUSTOMIZED_KEY, value: "1", updatedAt: now, updatedBy: userId })
         .onConflictDoUpdate({ target: [companySettings.companyId, companySettings.key], set: { value: "1", updatedAt: now, updatedBy: userId } });
+    invalidateSettings(db, companyId);
 }
 
 /** Все действующие правила компании (из БД или, пока их не задали, из конфигурации) */
@@ -201,43 +199,36 @@ export async function assignedCourseIds(db: Db, user: UserRef, rules?: Effective
         scopes.push(eq(courseAssignments.scope, "company"));
         if (user.branchId) scopes.push(and(eq(courseAssignments.scope, "branch"), eq(courseAssignments.branchId, user.branchId)));
     }
-    const explicit = await db
-        .select({ courseId: courseAssignments.courseId })
-        .from(courseAssignments)
-        .where(and(eq(courseAssignments.companyId, user.companyId), isNull(courseAssignments.removedAt), or(...scopes)))
-        .all();
+    const applicable = user.role === "employee" ? rulesForBranch(rules ?? (await companyRules(db, user.companyId)), user.branchId) : [];
+    // Явные назначения и курсы из правил — параллельно.
+    const [explicit, ruleCourses] = await Promise.all([
+        db
+            .select({ courseId: courseAssignments.courseId })
+            .from(courseAssignments)
+            .where(and(eq(courseAssignments.companyId, user.companyId), isNull(courseAssignments.removedAt), or(...scopes)))
+            .all(),
+        applicable.length
+            ? db
+                  .select({ id: courses.id, key: courses.key })
+                  .from(courses)
+                  .where(and(eq(courses.companyId, user.companyId), inArray(courses.key, applicable.map((rule) => rule.courseKey))))
+                  .all()
+            : Promise.resolve([]),
+    ]);
     for (const row of explicit) result.set(row.courseId, { requiredMin: null });
-
-    if (user.role === "employee") {
-        const applicable = rulesForBranch(rules ?? (await companyRules(db, user.companyId)), user.branchId);
-        if (applicable.length) {
-            const ruleCourses = await db
-                .select({ id: courses.id, key: courses.key })
-                .from(courses)
-                .where(and(eq(courses.companyId, user.companyId), inArray(courses.key, applicable.map((rule) => rule.courseKey))))
-                .all();
-            for (const course of ruleCourses) {
-                const rule = applicable.find((item) => item.courseKey === course.key);
-                result.set(course.id, { requiredMin: rule?.minScorePercent ?? null });
-            }
-        }
+    for (const course of ruleCourses) {
+        const rule = applicable.find((item) => item.courseKey === course.key);
+        result.set(course.id, { requiredMin: rule?.minScorePercent ?? null });
     }
     if (result.size === 0) return result;
-    const live = await db
+    // Курс в работе (не в архиве) и у него есть хотя бы одна версия — один запрос.
+    const usable = await db
         .select({ id: courses.id })
         .from(courses)
-        .where(and(inArray(courses.id, [...result.keys()]), isNull(courses.archivedAt)))
+        .where(and(inArray(courses.id, [...result.keys()]), isNull(courses.archivedAt), sql`exists (select 1 from ${courseVersions} where ${courseVersions.courseId} = ${courses.id})`))
         .all();
-    const liveIds = new Set(live.map((row) => row.id));
-    for (const id of [...result.keys()]) if (!liveIds.has(id)) result.delete(id);
-    if (result.size === 0) return result;
-    const versioned = await db
-        .selectDistinct({ courseId: courseVersions.courseId })
-        .from(courseVersions)
-        .where(inArray(courseVersions.courseId, [...result.keys()]))
-        .all();
-    const versionedIds = new Set(versioned.map((row) => row.courseId));
-    for (const id of [...result.keys()]) if (!versionedIds.has(id)) result.delete(id);
+    const usableIds = new Set(usable.map((row) => row.id));
+    for (const id of [...result.keys()]) if (!usableIds.has(id)) result.delete(id);
     return result;
 }
 
@@ -282,30 +273,32 @@ export async function applyAdmissionRules(db: Db, userId: string, now: number, a
 export async function evaluateRules(db: Db, user: UserRef) {
     if (user.role !== "employee") return [];
     const applicable = rulesForBranch(await companyRules(db, user.companyId), user.branchId);
-    const result: AdmissionOutcome["rules"] = [];
-    for (const rule of applicable) {
-        const course = await db
-            .select({ id: courses.id })
-            .from(courses)
-            .where(and(eq(courses.companyId, user.companyId), eq(courses.key, rule.courseKey)))
-            .get();
-        let best: number | null = null;
-        if (course) {
-            const attempts = await db
-                .select({ percent: testAttempts.scorePercent })
-                .from(testAttempts)
-                .where(and(eq(testAttempts.userId, user.id), eq(testAttempts.courseId, course.id), eq(testAttempts.status, "submitted")))
-                .all();
-            for (const attempt of attempts) if (attempt.percent !== null && (best === null || attempt.percent > best)) best = attempt.percent;
-        }
-        result.push({
-            courseKey: rule.courseKey,
-            minScorePercent: rule.minScorePercent,
-            bestPercent: best,
-            satisfied: best !== null && best >= rule.minScorePercent,
-            courseAvailable: Boolean(course),
-        });
-    }
+    // Каждое правило проверяется параллельно.
+    const result: AdmissionOutcome["rules"] = await Promise.all(
+        applicable.map(async (rule) => {
+            const course = await db
+                .select({ id: courses.id })
+                .from(courses)
+                .where(and(eq(courses.companyId, user.companyId), eq(courses.key, rule.courseKey)))
+                .get();
+            let best: number | null = null;
+            if (course) {
+                const attempts = await db
+                    .select({ percent: testAttempts.scorePercent })
+                    .from(testAttempts)
+                    .where(and(eq(testAttempts.userId, user.id), eq(testAttempts.courseId, course.id), eq(testAttempts.status, "submitted")))
+                    .all();
+                for (const attempt of attempts) if (attempt.percent !== null && (best === null || attempt.percent > best)) best = attempt.percent;
+            }
+            return {
+                courseKey: rule.courseKey,
+                minScorePercent: rule.minScorePercent,
+                bestPercent: best,
+                satisfied: best !== null && best >= rule.minScorePercent,
+                courseAvailable: Boolean(course),
+            };
+        })
+    );
     return result;
 }
 
